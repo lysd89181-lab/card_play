@@ -8,6 +8,23 @@ service cloud.firestore {
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function userPath(uid) { return /databases/$(db)/documents/users/$(uid); }
     function orderPath(id) { return /databases/$(db)/documents/orders/$(id); }
+    function settingsPath() { return /databases/$(db)/documents/settings/app; }
+    function rateFor(w) {
+      return exists(settingsPath()) ? get(settingsPath()).data.get('rates', {}).get(w, 1) : 1;
+    }
+
+    // purchase: exactly one wallet goes down by the price of a NEW order written in the same transaction
+    function purchaseOk(uid) {
+      let oid = request.resource.data.lastOrder;
+      let o = getAfter(orderPath(oid)).data;
+      let w = o.wallet;
+      return !exists(orderPath(oid))
+        && o.uid == uid
+        && request.resource.data.wallets.diff(resource.data.wallets).affectedKeys().hasOnly([w])
+        && request.resource.data.wallets[w] is int
+        && request.resource.data.wallets[w] >= 0
+        && request.resource.data.wallets[w] == resource.data.wallets.get(w, 0) - o.price;
+    }
 
     match /admins/{uid} {
       allow read: if me(uid) || isAdmin();
@@ -21,21 +38,23 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if me(uid) || isAdmin();
       allow create: if me(uid)
-        && request.resource.data.keys().hasOnly(['name','email','phone','photo','short','balance','createdAt'])
-        && request.resource.data.balance == 0
+        && request.resource.data.keys().hasOnly(['name','email','phone','photo','short','wallets','defWallet','createdAt'])
+        && request.resource.data.wallets is map && request.resource.data.wallets.size() == 0
         && request.resource.data.name is string && request.resource.data.name.size() <= 60;
       allow update: if isAdmin() || (me(uid) && (
           // profile edit
           (changed().hasOnly(['name','phone'])
             && request.resource.data.name is string && request.resource.data.name.size() <= 60
             && request.resource.data.phone is string && request.resource.data.phone.size() <= 20)
-          // purchase: balance goes down by exactly the price of a NEW order created in the same write
-          || (changed().hasOnly(['balance','lastOrder'])
-            && request.resource.data.balance is int
-            && request.resource.data.balance >= 0
-            && !exists(orderPath(request.resource.data.lastOrder))
-            && getAfter(orderPath(request.resource.data.lastOrder)).data.uid == uid
-            && getAfter(orderPath(request.resource.data.lastOrder)).data.price == resource.data.balance - request.resource.data.balance)
+          // choose default wallet
+          || (changed().hasOnly(['defWallet'])
+            && request.resource.data.defWallet is string && request.resource.data.defWallet.size() <= 20)
+          // old accounts: add empty wallets map once
+          || (changed().hasOnly(['wallets'])
+            && !('wallets' in resource.data)
+            && request.resource.data.wallets is map && request.resource.data.wallets.size() == 0)
+          // purchase
+          || ('wallets' in resource.data && changed().hasOnly(['wallets','lastOrder']) && purchaseOk(uid))
         ));
       allow delete: if false;
     }
@@ -43,29 +62,31 @@ service cloud.firestore {
     match /orders/{oid} {
       allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
       allow create: if signed()
-        && request.resource.data.keys().hasOnly(['uid','uName','uShort','productId','productName','optionIndex','optionLabel','price','input','no','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','productId','productName','optionIndex','optionLabel','price','wallet','cur','input','no','status','createdAt','updatedAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
+        && request.resource.data.wallet is string
         && request.resource.data.price is int && request.resource.data.price > 0
         && request.resource.data.input is string && request.resource.data.input.size() <= 200
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.active == true
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.name == request.resource.data.productName
-        && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].price == request.resource.data.price
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].label == request.resource.data.optionLabel
+        && request.resource.data.price == math.round(float(get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].price) * float(rateFor(request.resource.data.wallet)))
         && getAfter(userPath(request.auth.uid)).data.lastOrder == oid
-        && getAfter(userPath(request.auth.uid)).data.balance == get(userPath(request.auth.uid)).data.balance - request.resource.data.price;
+        && getAfter(userPath(request.auth.uid)).data.wallets[request.resource.data.wallet] == get(userPath(request.auth.uid)).data.wallets.get(request.resource.data.wallet, 0) - request.resource.data.price;
       allow update, delete: if isAdmin();
     }
 
     match /topups/{id} {
       allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
       allow create: if isAdmin() || (signed()
-        && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','amount','ref','note','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','wallet','cur','amount','note','status','createdAt','updatedAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.method != 'admin'
+        && request.resource.data.wallet == request.resource.data.method
+        && request.resource.data.wallet is string && request.resource.data.wallet.size() <= 20
         && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
-        && request.resource.data.ref is string && request.resource.data.ref.size() <= 200
         && request.resource.data.note is string && request.resource.data.note.size() <= 300);
       allow update, delete: if isAdmin();
     }

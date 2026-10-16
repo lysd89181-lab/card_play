@@ -8,7 +8,6 @@
 <meta name="description" content="كارد بلاي — اشحن ألعابك واشتري بطاقاتك واشتراكاتك بأسرع وأسهل طريقة في ليبيا">
 <link rel="icon" href="img/icon-192.png">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-<link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
@@ -116,8 +115,9 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   radial-gradient(40% 60% at 30% 20%,rgba(30,123,255,.6),transparent 70%),
   linear-gradient(135deg,#0B1F4A,#061026)}
 .b-def .art{position:absolute;left:14px;top:50%;transform:translateY(-50%) rotate(-8deg);width:38%;max-width:150px;opacity:.95;filter:drop-shadow(0 0 22px rgba(30,123,255,.7))}
-.dots{display:flex;justify-content:center;gap:6px;margin:10px 0 4px}
-.dots i{width:6px;height:6px;border-radius:6px;background:var(--dim);transition:.3s}
+.dots{display:flex;justify-content:center;gap:6px;position:absolute;bottom:9px;left:0;right:0;z-index:2}
+.home-side{margin-top:14px}
+.dots i{width:6px;height:6px;border-radius:6px;background:rgba(255,255,255,.45);transition:.3s}
 .dots i.on{width:18px;background:var(--blue)}
 
 .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0 18px}
@@ -274,6 +274,72 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .acc-box .k b{font-size:17px;direction:ltr}
 .acc-box p{color:var(--muted);font-size:13px;margin-top:6px;white-space:pre-line}
 
+/* wallets */
+.wl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -16px;padding:4px 16px 8px}
+.wl::-webkit-scrollbar{display:none}
+.wc{flex:0 0 82%;max-width:330px;scroll-snap-align:center;position:relative;border-radius:22px;padding:16px 18px;overflow:hidden;border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 14px 34px -14px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.2);display:flex;flex-direction:column;gap:6px;min-height:178px;text-align:right}
+.wc::after{content:"";position:absolute;inset:auto -30% -60% auto;width:70%;aspect-ratio:1;border-radius:50%;background:rgba(255,255,255,.08)}
+.wc .wh{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.wc .wn{font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px}
+.wc .wi{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);font-weight:900;font-size:17px}
+.wc .wi svg{width:22px;height:22px}
+.wc small{font-size:12.5px;opacity:.85;font-weight:600}
+.wc .amt{font-size:30px;font-weight:900;line-height:1.15}
+.wc .amt span{font-size:15px;font-weight:700;margin-right:4px;opacity:.85}
+.wc .wf{margin-top:auto;display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid rgba(255,255,255,.18);padding-top:10px;position:relative;z-index:1}
+.wc .def{font-size:12px;font-weight:800;padding:3px 10px;border-radius:9px;background:rgba(255,255,255,.2);display:inline-flex;align-items:center;gap:4px}
+.wc .def svg{width:14px;height:14px}
+.wc .mk-def{font-size:12px;font-weight:800;padding:4px 11px;border-radius:9px;border:1px solid rgba(255,255,255,.4)}
+.wc .top-up{font-size:12.5px;font-weight:800;padding:5px 12px;border-radius:10px;background:#fff;color:#0b1f4a;position:relative;z-index:1}
+.wsel{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-bottom:14px;padding-bottom:2px}
+.wsel::-webkit-scrollbar{display:none}
+.wsel button{flex-shrink:0;padding:8px 12px;border-radius:13px;border:1px solid var(--line);background:rgba(10,22,46,.7);text-align:right;min-width:112px}
+.wsel button b{display:block;font-size:13.5px;font-weight:800}
+.wsel button small{font-size:12px;color:var(--muted);font-weight:700}
+.wsel button.on{border-color:var(--blue);background:linear-gradient(160deg,rgba(30,123,255,.3),rgba(10,22,46,.7));box-shadow:var(--glow)}
+.wsel button.on small{color:var(--blue2)}
+
+/* ---------- desktop ---------- */
+@media (hover:hover){
+  .pcard:hover,.cat:hover,.pm:hover,.ocard:hover,.ch:hover{border-color:var(--line2);transform:translateY(-2px)}
+  .btn-p:hover{filter:brightness(1.1)}
+  .menu a:hover,.menu button:hover{background:rgba(30,123,255,.07)}
+}
+@media (min-width:900px){
+  body{font-size:15.5px}
+  .wrap{max-width:1180px}
+  #app{padding:84px 0 40px}
+  .view{padding:18px 28px 10px}
+  .view.narrow{max-width:760px;margin:0 auto}
+  .nav{top:0;bottom:auto;left:0;transform:none;max-width:none;display:flex;justify-content:center;gap:6px;padding:10px 24px;border-top:none;border-bottom:1px solid var(--line);background:rgba(5,11,26,.82)}
+  .nav::before{content:"";position:absolute;right:28px;top:50%;transform:translateY(-50%);width:150px;height:40px;background:url(img/wordmark.png) right center/contain no-repeat}
+  .nav button{flex-direction:row;gap:8px;font-size:15px;padding:10px 18px;border-radius:12px}
+  .nav button:hover{color:var(--text);background:rgba(30,123,255,.08)}
+  .nav button.on{background:rgba(30,123,255,.14)}
+  .nav button.on::before{top:auto;bottom:-11px;width:60%}
+  .topbar .brand{visibility:hidden}
+  .home-top{display:grid;grid-template-columns:1.6fr 1fr;gap:18px;align-items:stretch;margin-bottom:6px}
+  .home-top .banners{height:100%}
+  .home-top .b-slide{aspect-ratio:auto;height:100%;min-height:260px}
+  .home-side{display:flex;flex-direction:column;gap:12px;margin-top:0}
+  .home-side .cats{grid-template-columns:1fr;margin:0;flex:1}
+  .home-side .cat{flex-direction:row;justify-content:flex-start;gap:14px;padding:14px 18px;font-size:16px}
+  .home-side .search{margin:0}
+  .grid{grid-template-columns:repeat(6,1fr);gap:14px}
+  .b-txt h3{font-size:30px}.b-txt p{font-size:16px}
+  .wl{margin:0;padding:4px 0 8px;flex-wrap:wrap;overflow:visible}
+  .wc{flex:1 1 240px;max-width:none}
+  .pm-grid{grid-template-columns:repeat(4,1fr)}
+  .sheet{top:50%;bottom:auto;left:50%;width:520px;max-height:86vh;border-radius:24px;border-bottom:1px solid var(--line2);transform:translate(-50%,-46%) scale(.97);opacity:0;pointer-events:none;transition:.22s}
+  .sheet.on{transform:translate(-50%,-50%);opacity:1;pointer-events:auto}
+  .sheet .grab{display:none}
+  #auth{justify-content:center;padding:40px 22px}
+  #auth>*{width:100%;max-width:420px;margin-left:auto;margin-right:auto}
+  #auth .seg,#auth form,#auth .or,#auth #gBtn{max-width:420px}
+}
+@media (min-width:900px) and (max-width:1100px){ .grid{grid-template-columns:repeat(5,1fr)} }
+
 #toast{position:fixed;top:calc(14px + env(safe-area-inset-top,0px));left:50%;transform:translate(-50%,-140%);z-index:60;
   padding:11px 18px;border-radius:14px;background:#0E2148;border:1px solid var(--line2);box-shadow:0 10px 30px rgba(0,0,0,.5);font-weight:700;font-size:14px;transition:.3s;max-width:92%;text-align:center}
 #toast.on{transform:translate(-50%,0)}
@@ -387,7 +453,7 @@ const $ = s => document.querySelector(s);
 const iso = s => "\u2068" + s + "\u2069";
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const ic = (n, cls="") => `<svg class="i ${cls}" viewBox="0 0 24 24"><use href="#i-${n}"/></svg>`;
-const money = c => `<span class="num">${((Number(c)||0)/100).toFixed(2)}</span> د.ل`;
+const money = (c, cur="د.ل") => `<span class="num">${((Number(c)||0)/100).toFixed(2)}</span> ${esc(cur)}`;
 const toCents = v => Math.round(parseFloat(String(v).replace(",", ".")) * 100);
 const ms = t => t?.toMillis ? t.toMillis() : (t?.seconds ? t.seconds*1000 : 0);
 const fdate = t => { const m = ms(t); if (!m) return "الآن"; const d = new Date(m);
@@ -415,19 +481,19 @@ const STATUS = {
 };
 const DEF_SETTINGS = {
   payments: [
-    { key:"libyana", name:"ليبيانا",      sub:"تحويل رصيد", account:"", note:"", enabled:true },
-    { key:"almadar", name:"المدار",       sub:"تحويل رصيد", account:"", note:"", enabled:true },
-    { key:"bank",    name:"تحويل مصرفي",  sub:"حساب بنكي",  account:"", note:"", enabled:true },
-    { key:"usdt",    name:"USDT",         sub:"TRC20",       account:"", note:"", enabled:true }
+    { key:"libyana", name:"ليبيانا",      sub:"محفظة ليبيانا", cur:"د.ل", rate:1, account:"", note:"", enabled:true },
+    { key:"almadar", name:"المدار",       sub:"محفظة المدار",  cur:"د.ل", rate:1, account:"", note:"", enabled:true },
+    { key:"bank",    name:"مصرفي",        sub:"محفظة مصرفية",  cur:"د.ل", rate:1, account:"", note:"", enabled:true },
+    { key:"usdt",    name:"USDT",         sub:"محفظة USDT",    cur:"$",   rate:1, account:"", note:"", enabled:true }
   ],
   channels: [], support: { whatsapp:"", telegram:"" }, faq: []
 };
 const PM_STYLE = {
-  libyana:{ bg:"linear-gradient(135deg,#FF8A1F,#E2420E)", i:"sim" },
-  almadar:{ bg:"linear-gradient(135deg,#25B7F0,#0A6FD6)", i:"sim" },
-  bank:   { bg:"linear-gradient(135deg,#3D8BFF,#1A3E9C)", i:"bank" },
-  usdt:   { bg:"linear-gradient(135deg,#2FBF8F,#16856A)", t:"₮" },
-  other:  { bg:"linear-gradient(135deg,#5B6E92,#2C3A58)", i:"wallet" }
+  libyana:{ bg:"linear-gradient(135deg,#B23AC9,#6A1B8E)", card:"linear-gradient(140deg,#C04BD6 0%,#7B2A9E 55%,#4A1466 100%)", i:"sim" },
+  almadar:{ bg:"linear-gradient(135deg,#25B7F0,#0A6FD6)", card:"linear-gradient(140deg,#2CC0F5 0%,#0D74D9 55%,#06408A 100%)", i:"sim" },
+  bank:   { bg:"linear-gradient(135deg,#3D8BFF,#1A3E9C)", card:"linear-gradient(140deg,#3E7BE8 0%,#2453B8 55%,#132E70 100%)", i:"bank" },
+  usdt:   { bg:"linear-gradient(135deg,#2FBF8F,#16856A)", card:"linear-gradient(140deg,#35C99A 0%,#178A6C 55%,#0B4A3B 100%)", t:"₮" },
+  other:  { bg:"linear-gradient(135deg,#5B6E92,#2C3A58)", card:"linear-gradient(140deg,#6A7FA6 0%,#3A4A6E 55%,#1E2840 100%)", i:"wallet" }
 };
 const CH_STYLE = {
   telegram:{ bg:"#2AABEE", i:"tg",  btn:"انضم الآن" },
@@ -447,9 +513,18 @@ function pimg(p, cls="pimg"){
 
 /* ================= state ================= */
 const S = { user:null, me:null, products:[], banners:[], settings:DEF_SETTINGS, orders:[], topups:[], tickets:[],
-  cat:"all", q:"", showAll:false, otab:"all", unsubs:[], ready:{ products:false } };
+  cat:"all", q:"", showAll:false, otab:"all", htab:"all", unsubs:[], ready:{ products:false } };
 const set = (o) => ({ ...DEF_SETTINGS, ...o, support:{ ...DEF_SETTINGS.support, ...(o?.support||{}) },
   payments: (o?.payments && o.payments.length) ? o.payments : DEF_SETTINGS.payments });
+const pays = () => S.settings.payments.filter(p => p.enabled !== false);
+const W = k => S.settings.payments.find(p => p.key === k) || { key:k, name:k, cur:"د.ل", rate:1 };
+const curOf = k => W(k).cur || "د.ل";
+const rateOf = k => { const r = Number(W(k).rate); return r > 0 ? r : 1; };
+const wbal = k => Number((S.me?.wallets || {})[k]) || 0;
+const defW = () => { const ps = pays(), d = S.me?.defWallet; return (ps.find(p => p.key === d) || ps[0] || { key:"bank" }).key; };
+const priceIn = (cents, k) => Math.round(Number(cents) * rateOf(k));
+const pst = k => PM_STYLE[k] || PM_STYLE.other;
+const wIcon = k => { const st = pst(k); return st.t || ic(st.i); };
 
 /* ================= auth UI ================= */
 let mode = "login";
@@ -522,12 +597,12 @@ function ensureUserDoc(u){ return ensuring[u.uid] ||= _ensure(u).finally(()=>set
 async function _ensure(u){
   const ref = doc(db, "users", u.uid);
   const snap = await getDoc(ref);
-  if (snap.exists()) return;
+  if (snap.exists()) { if (!snap.data().wallets) await updateDoc(ref, { wallets:{} }).catch(()=>{}); return; }
   const short = "CP" + String(Math.floor(100000 + Math.random()*900000));
   await setDoc(ref, {
     name: (pendingProfile?.name || u.displayName || (u.email||"").split("@")[0] || "مستخدم").slice(0,60),
     email: u.email || "", phone: (pendingProfile?.phone || u.phoneNumber || "").slice(0,20),
-    photo: u.photoURL || "", short, balance: 0, createdAt: serverTimestamp()
+    photo: u.photoURL || "", short, wallets: {}, defWallet: "", createdAt: serverTimestamp()
   });
   pendingProfile = null;
 }
@@ -554,7 +629,7 @@ onSnapshot(collection(db,"banners"), s => { S.banners = s.docs.map(d=>({id:d.id,
 onSnapshot(doc(db,"settings","app"), s => { S.settings = set(s.exists()? s.data() : {}); render(); }, ()=>{});
 
 function show(which){
-  const boot = $("#boot"); boot.style.opacity = 0; setTimeout(()=>boot.remove?.(), 400);
+  const boot = $("#boot"); if (boot) { boot.style.opacity = 0; setTimeout(()=>boot.remove(), 400); }
   $("#auth").classList.toggle("hidden", which!=="auth");
   $("#app").classList.toggle("hidden", which!=="app");
 }
@@ -577,7 +652,7 @@ function render(scrollTop){
   const focused = document.activeElement?.id;
   const caret = document.activeElement?.selectionStart;
   const keepVals = {}; document.querySelectorAll("#view [data-keep]").forEach(el => keepVals[el.id] = el.value);
-  $("#view").innerHTML = `<div class="view">${VIEWS[r]()}</div>`;
+  $("#view").innerHTML = `<div class="view ${r==="home"||r==="wallet"?"":"narrow"}">${VIEWS[r]()}</div>`;
   Object.entries(keepVals).forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.value=v; });
   if (focused) { const el = document.getElementById(focused); if (el && el.tagName==="INPUT"){ el.focus(); try{ el.setSelectionRange(caret,caret);}catch{} } }
   AFTER[r]?.();
@@ -586,8 +661,9 @@ function render(scrollTop){
 }
 const back = to => `<button class="icon-btn back" onclick="${to ? `location.hash='#${to}'` : "history.back()"}">${ic("back")}</button>`;
 const pagebar = (title, to, act="") => `<div class="pagebar">${back(to)}<h1>${title}</h1>${act}</div>`;
-const balance = () => S.me?.balance ?? 0;
+const balance = () => wbal(defW());
 const minPrice = p => Math.min(...(p.options||[]).map(o=>Number(o.price)||0));
+const balChip = () => { const k = defW(); return `<div class="bal-chip" onclick="location.hash='#wallet'"><small>${esc(W(k).name)}</small><b>${money(wbal(k), curOf(k))}</b></div>`; };
 
 /* ================= views ================= */
 const VIEWS = {
@@ -598,35 +674,39 @@ home(){
   const bannersArr = S.banners.length ? S.banners : [{ _def:true }];
   return `
   <div class="topbar">
-    <div class="bal-chip" onclick="location.hash='#wallet'"><small>الرصيد الحالي</small><b>${money(balance())}</b></div>
+    ${balChip()}
     <div class="brand"><img class="mk" src="img/mark.png" alt=""><img class="wm" src="img/wordmark.png" alt="CARD PLAY"></div>
     <button class="icon-btn" id="bellBtn">${ic("bell")}<i class="dot hidden" id="bellDot"></i></button>
   </div>
-  <label class="search">${ic("search")}<input id="q" data-keep placeholder="ابحث عن بطاقة أو لعبة..." value="${esc(S.q)}" autocomplete="off"></label>
-  <div class="banners"><div class="b-track" id="bTrack">${bannersArr.map(b => b._def ? `
+  <div class="home-top"><div class="banners"><div class="b-track" id="bTrack">${bannersArr.map(b => b._def ? `
     <div class="b-slide b-def"><img class="art" src="img/mark.png" alt=""><div class="b-txt"><h3>اشحن ألعابك الآن</h3><p>بأسرع وأسهل طريقة</p><button class="cta" onclick="pickCat('games')">اكتشف المزيد</button></div></div>` : `
     <div class="b-slide" style="background-image:url('${esc(b.image||"")}')"><div class="b-txt">${b.title?`<h3>${esc(b.title)}</h3>`:""}${b.subtitle?`<p>${esc(b.subtitle)}</p>`:""}${b.cta?`<button class="cta" data-blink="${esc(b.link||"")}">${esc(b.cta)}</button>`:""}</div></div>`).join("")}
-  </div></div>
-  <div class="dots" id="bDots">${bannersArr.length>1 ? bannersArr.map((_,i)=>`<i class="${i?"":"on"}"></i>`).join("") : ""}</div>
-  <div class="cats">${CATS.slice(1).map(c => `<button class="cat ${S.cat===c.key?"on":""}" onclick="pickCat('${c.key}')">${ic(c.icon)}${c.name}</button>`).join("")}</div>
+  </div><div class="dots" id="bDots">${bannersArr.length>1 ? bannersArr.map((_,i)=>`<i class="${i?"":"on"}"></i>`).join("") : ""}</div></div>
+  <div class="home-side"><label class="search">${ic("search")}<input id="q" data-keep placeholder="ابحث عن بطاقة أو لعبة..." value="${esc(S.q)}" autocomplete="off"></label>
+  <div class="cats">${CATS.slice(1).map(c => `<button class="cat ${S.cat===c.key?"on":""}" onclick="pickCat('${c.key}')">${ic(c.icon)}${c.name}</button>`).join("")}</div></div></div>
   <div class="sec-h"><h2>${S.cat==="all" ? (q ? "نتائج البحث" : "أحدث المنتجات") : CATS.find(c=>c.key===S.cat).name}</h2>
     ${S.cat!=="all" ? `<button onclick="pickCat('all')">عرض الكل</button>` : (list.length>9 && !q ? `<button onclick="toggleAll()">${S.showAll?"عرض أقل":"عرض الكل"}</button>` : "")}</div>
   ${!S.ready.products ? `<div class="grid">${Array(6).fill('<div class="pcard"><div class="pph skel"></div><div class="meta"><div class="nm skel" style="height:12px;border-radius:6px"></div></div></div>').join("")}</div>`
     : limited.length ? `<div class="grid">${limited.map(p => `
-      <button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div><div class="pr">من ${money(minPrice(p))}</div></div></button>`).join("")}</div>`
+      <button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div><div class="pr">من ${money(priceIn(minPrice(p), defW()), curOf(defW()))}</div></div></button>`).join("")}</div>`
     : `<div class="empty">${ic("search")}<div>${q ? "ما في نتائج لبحثك" : "لا توجد منتجات حالياً"}</div></div>`}`;
 },
 wallet(){
-  const pays = S.settings.payments.filter(p=>p.enabled!==false);
-  const hist = txHistory().slice(0,6);
+  const ps = pays(), dk = defW();
+  const all = txHistory(), hist = all.filter(x => S.htab==="all" || x.kind===S.htab).slice(0,8);
   return `${pagebar("المحفظة","home")}
-  <div class="wcard"><div><small>الرصيد الحالي</small><div class="amt num">${((balance())/100).toFixed(2)}<span>د.ل</span></div><div class="uid">ID: ${esc(S.me?.short||"")}</div></div>
-    <div class="wic">${ic("wallet")}</div></div>
-  <div class="row2"><button class="btn btn-p" onclick="openTopup()">${ic("plus")} شحن الرصيد</button><button class="btn btn-o" onclick="location.hash='#history'">${ic("history")} سجل العمليات</button></div>
-  <div class="sec-h"><h2>طرق الدفع</h2></div>
-  <div class="pm-grid">${pays.map(p => { const st = PM_STYLE[p.key] || PM_STYLE.other;
-    return `<button class="pm" onclick="openTopup('${esc(p.key)}')"><span class="ic" style="background:${st.bg}">${st.t || ic(st.i)}</span><span>${esc(p.name)}<small>${esc(p.sub||"")}</small></span></button>`; }).join("")}</div>
-  <div class="sec-h"><h2>آخر العمليات</h2>${txHistory().length>6?`<button onclick="location.hash='#history'">عرض الكل</button>`:""}</div>
+  <div class="wl">${ps.map(p => { const st = pst(p.key), d = p.key===dk;
+    return `<div class="wc" style="background:${st.card}">
+      <div class="wh"><span class="wn"><span class="wi">${wIcon(p.key)}</span>${esc(p.name)}</span>${d?`<span class="def">${ic("check")} افتراضي</span>`:""}</div>
+      <small>الرصيد المتاح</small>
+      <div class="amt num">${(wbal(p.key)/100).toFixed(2)}<span>${esc(curOf(p.key))}</span></div>
+      <small>${esc(p.sub || "محفظة "+p.name)}</small>
+      <div class="wf">${d ? `<small>المحفظة الافتراضية</small>` : `<button class="mk-def" onclick="setDefW('${esc(p.key)}')">تعيين كافتراضية</button>`}
+        <button class="top-up" onclick="openTopup('${esc(p.key)}')">+ شحن</button></div></div>`; }).join("")}</div>
+  <div class="sec-h" style="margin-top:14px"><h2>شحن المحفظة</h2><small style="color:var(--muted)">اختر طريقة الدفع المناسبة</small></div>
+  <div class="pm-grid">${ps.map(p => `<button class="pm" onclick="openTopup('${esc(p.key)}')"><span class="ic" style="background:${pst(p.key).bg}">${wIcon(p.key)}</span><span>شحن ${esc(p.name)}<small>${esc(p.sub||"")}</small></span></button>`).join("")}</div>
+  <div class="sec-h"><h2>المعاملات</h2>${all.length>8?`<button onclick="location.hash='#history'">عرض الكل</button>`:""}</div>
+  <div class="tabs">${[["all","الكل"],["in","إيداع"],["buy","شراء"]].map(([k,t])=>`<button class="${S.htab===k?"on":""}" onclick="setHtab('${k}')">${t}</button>`).join("")}</div>
   ${txList(hist)}`;
 },
 history(){ return `${pagebar("سجل العمليات","wallet")}${txList(txHistory())}`; },
@@ -637,7 +717,7 @@ orders(){
   <div class="tabs">${tabs.map(([k,t]) => `<button class="${S.otab===k?"on":""}" onclick="setOtab('${k}')">${t}</button>`).join("")}</div>
   ${list.length ? list.map(o => { const st = STATUS[o.status]||STATUS.pending; const p = S.products.find(x=>x.id===o.productId) || { name:o.productName };
     return `<button class="ocard" onclick="openOrder('${o.id}')"><div class="oimg">${pimg(p)}</div>
-      <div class="ob"><b>${esc(o.productName)}</b><small>${iso(esc(o.optionLabel||""))}</small><small>رقم الطلب <span class="num">#${esc(o.no)}</span></small><small>${fdate(o.createdAt)}</small><div class="p">${money(o.price)}</div></div>
+      <div class="ob"><b>${esc(o.productName)}</b><small>${iso(esc(o.optionLabel||""))}</small><small>رقم الطلب <span class="num">#${esc(o.no)}</span></small><small>${fdate(o.createdAt)}</small><div class="p">${money(o.price, o.cur)}</div></div>
       <div class="os"><span class="badge ${st.c}">${st.t}</span></div></button>`; }).join("")
   : `<div class="empty">${ic("receipt")}<div>لا توجد طلبات ${S.otab!=="all"?"في هذا القسم":"بعد"}</div>${S.otab==="all"?`<div style="margin-top:14px"><button class="btn btn-p" style="width:auto;margin:auto" onclick="location.hash='#home'">تصفح المنتجات</button></div>`:""}</div>`}`;
 },
@@ -646,7 +726,7 @@ account(){
   return `${pagebar("حسابي","home")}
   <div class="prof"><div class="ava">${m.photo?`<img src="${esc(m.photo)}" alt="">`:esc((m.name||"؟").trim()[0]||"؟")}</div>
     <div><h2>${esc(m.name||"")}</h2><div class="id num" style="text-align:right">ID: ${esc(m.short||"")}</div>
-    <div class="minibal"><small>الرصيد الحالي</small><b>${money(balance())}</b></div></div></div>
+    <div class="minibal"><small>${esc(W(defW()).name)}</small><b>${money(balance(), curOf(defW()))}</b></div></div></div>
   <div class="list menu">
     <a href="#channels"><span class="mi">${ic("mega")}</span><span class="sp">قنواتي</span>${ic("chev","chev")}</a>
     <a href="#support"><span class="mi">${ic("headset")}</span><span class="sp">الدعم</span>${ic("chev","chev")}</a>
@@ -709,6 +789,8 @@ const AFTER = {
 window.pickCat = k => { S.cat = k; S.showAll = false; if (route()!=="home") location.hash="#home"; else render(); };
 window.toggleAll = () => { S.showAll = !S.showAll; render(); };
 window.setOtab = k => { S.otab = k; render(); };
+window.setHtab = k => { S.htab = k; render(); };
+window.setDefW = async k => { try { await updateDoc(doc(db,"users",S.user.uid), { defWallet:k }); toast("تم تعيين المحفظة الافتراضية ✓","s"); } catch(e){ console.error(e); toast("تعذر التعديل","e"); } };
 window.logout = async () => { if (confirm("تسجيل الخروج من حسابك؟")) { await signOut(auth); location.hash=""; } };
 function bannerGo(l){
   if (!l) return;
@@ -735,22 +817,25 @@ function slider(){
 function txHistory(){
   const items = [];
   S.topups.forEach(t => {
-    const neg = t.amount < 0;
-    const title = t.method==="admin" ? (neg ? "خصم من الإدارة" : "إضافة رصيد من الإدارة") : `شحن رصيد — ${t.methodName||""}`;
-    if (t.status==="approved") items.push({ t:ms(t.createdAt)||Date.now(), title, sub:fdate(t.createdAt), amt:t.amount, cls:neg?"minus":"plus", icon:"wallet", note:t.note });
-    else if (t.status==="pending") items.push({ t:ms(t.createdAt)||Date.now(), title, sub:"قيد المراجعة · "+fdate(t.createdAt), amt:t.amount, cls:"pend", icon:"history" });
-    else items.push({ t:ms(t.createdAt), title, sub:"مرفوض"+(t.adminNote?` · ${t.adminNote}`:""), amt:t.amount, cls:"gray", icon:"wallet" });
+    const w = t.wallet || t.method, cur = t.method==="admin" ? curOf(w) : (t.cur || curOf(w)), neg = t.amount < 0;
+    const wn = W(w).name;
+    const title = t.method==="admin" ? (neg ? `خصم من الإدارة — ${wn}` : `إضافة رصيد — ${wn}`) : `شحن محفظة ${t.methodName||wn}`;
+    const kind = neg ? "buy" : "in";
+    if (t.status==="approved") items.push({ kind, t:ms(t.createdAt)||Date.now(), title, sub:fdate(t.createdAt), amt:t.amount, cur, cls:neg?"minus":"plus", icon:"wallet" });
+    else if (t.status==="pending") items.push({ kind, t:ms(t.createdAt)||Date.now(), title, sub:"قيد المراجعة · "+fdate(t.createdAt), amt:t.amount, cur, cls:"pend", icon:"history" });
+    else items.push({ kind, t:ms(t.createdAt), title, sub:"مرفوض"+(t.adminNote?` · ${t.adminNote}`:""), amt:t.amount, cur, cls:"gray", icon:"wallet" });
   });
   S.orders.forEach(o => {
-    items.push({ t:ms(o.createdAt)||Date.now(), title:`شراء ${o.productName}`, sub:`${iso(o.optionLabel||"")} · ${fdate(o.createdAt)}`, amt:-o.price, cls:"minus", icon:"cart" });
-    if (o.status==="cancelled" && o.refunded) items.push({ t:ms(o.updatedAt)||ms(o.createdAt), title:`استرجاع — ${o.productName}`, sub:fdate(o.updatedAt), amt:o.price, cls:"plus", icon:"history" });
+    const cur = o.cur || "د.ل";
+    items.push({ kind:"buy", t:ms(o.createdAt)||Date.now(), title:`شراء ${o.productName}`, sub:`${iso(o.optionLabel||"")} · ${o.wallet?W(o.wallet).name+" · ":""}${fdate(o.createdAt)}`, amt:-o.price, cur, cls:"minus", icon:"cart" });
+    if (o.status==="cancelled" && o.refunded) items.push({ kind:"in", t:ms(o.updatedAt)||ms(o.createdAt), title:`استرجاع — ${o.productName}`, sub:fdate(o.updatedAt), amt:o.price, cur, cls:"plus", icon:"history" });
   });
   return items.sort((a,b)=>b.t-a.t);
 }
 function txList(items){
   if (!items.length) return `<div class="empty">${ic("history")}<div>لا توجد عمليات بعد</div></div>`;
   return `<div class="list">${items.map(x => `<div class="tx"><span class="ic">${ic(x.icon)}</span><div class="t"><b>${esc(x.title)}</b><small style="display:block">${esc(x.sub)}</small></div>
-    <div class="a ${x.cls}"><span class="num">${x.amt>0?"+":x.amt<0?"−":""} ${(Math.abs(x.amt)/100).toFixed(2)}</span> <small>د.ل</small></div></div>`).join("")}</div>`;
+    <div class="a ${x.cls}"><span class="num">${x.amt>0?"+":x.amt<0?"−":""} ${(Math.abs(x.amt)/100).toFixed(2)}</span> <small>${esc(x.cur||"د.ل")}</small></div></div>`).join("")}</div>`;
 }
 
 /* ================= sheet ================= */
@@ -766,23 +851,32 @@ let selOpt = 0;
 window.openProduct = id => {
   const p = S.products.find(x=>x.id===id); if (!p) return;
   selOpt = 0;
+  let wk = defW();
   const opts = p.options || [];
   openSheet(`
     <div class="ph"><div class="oimg">${pimg(p)}</div><div><h3>${esc(p.name)}</h3>${p.description?`<p>${esc(p.description)}</p>`:""}</div></div>
-    ${opts.length ? `<div class="fld"><label>اختر الباقة</label></div><div class="opts">${opts.map((o,i)=>`<button class="opt ${i===0?"on":""}" data-i="${i}"><b>${iso(esc(o.label))}</b><small>${money(o.price)}</small></button>`).join("")}</div>` : `<div class="empty">لا توجد باقات متاحة</div>`}
+    ${opts.length ? `<div class="fld"><label>اختر الباقة</label></div><div class="opts" id="pOpts"></div>` : `<div class="empty">لا توجد باقات متاحة</div>`}
     ${p.needsInput ? `<div class="fld"><label>${esc(p.inputLabel||"ID اللاعب")}</label><input class="inp" id="pIn" placeholder="${esc(p.inputHint||"اكتب هنا")}" dir="auto" maxlength="200"></div>` : ""}
-    <div class="sum"><span>رصيدك: ${money(balance())}</span><span>الإجمالي: <b id="pTot">${opts[0]?money(opts[0].price):"—"}</b></span></div>
+    <div class="fld"><label>الدفع من محفظة</label></div><div class="wsel" id="pW"></div>
+    <div class="sum"><span id="pBal"></span><span>الإجمالي: <b id="pTot">—</b></span></div>
     <button class="btn btn-p" id="buyBtn" ${opts.length?"":"disabled"}></button>`);
   const upd = () => {
-    const o = opts[selOpt]; $("#pTot").innerHTML = money(o.price);
-    const ok = balance() >= o.price;
-    $("#buyBtn").innerHTML = ok ? `${ic("cart")} تأكيد الشراء` : `${ic("plus")} رصيدك غير كافي — اشحن الآن`;
-    $("#buyBtn").onclick = ok ? () => buy(p, selOpt) : () => { closeSheet(); location.hash="#wallet"; setTimeout(()=>openTopup(),350); };
+    const cur = curOf(wk);
+    $("#pW").innerHTML = pays().map(w => `<button class="${w.key===wk?"on":""}" data-w="${esc(w.key)}"><b>${esc(w.name)}</b><small>${money(wbal(w.key), curOf(w.key))}</small></button>`).join("");
+    document.querySelectorAll("#pW [data-w]").forEach(b => b.onclick = () => { wk = b.dataset.w; upd(); });
+    $("#pBal").innerHTML = `رصيدك: ${money(wbal(wk), cur)}`;
+    if (!opts.length) return;
+    $("#pOpts").innerHTML = opts.map((o,i)=>`<button class="opt ${i===selOpt?"on":""}" data-i="${i}"><b>${iso(esc(o.label))}</b><small>${money(priceIn(o.price, wk), cur)}</small></button>`).join("");
+    document.querySelectorAll("#pOpts .opt").forEach(b => b.onclick = () => { selOpt=+b.dataset.i; upd(); });
+    const price = priceIn(opts[selOpt].price, wk);
+    $("#pTot").innerHTML = money(price, cur);
+    const ok = wbal(wk) >= price;
+    $("#buyBtn").innerHTML = ok ? `${ic("cart")} تأكيد الشراء` : `${ic("plus")} رصيد ${esc(W(wk).name)} غير كافي — اشحن الآن`;
+    $("#buyBtn").onclick = ok ? () => buy(p, selOpt, wk) : () => { closeSheet(); setTimeout(()=>openTopup(wk),350); };
   };
-  document.querySelectorAll(".opt").forEach(b => b.onclick = () => { selOpt=+b.dataset.i; document.querySelectorAll(".opt").forEach(x=>x.classList.toggle("on",x===b)); upd(); });
-  if (opts.length) upd();
+  upd();
 };
-async function buy(p, i){
+async function buy(p, i, wk){
   const input = $("#pIn")?.value.trim() || "";
   if (p.needsInput && !input) return toast(`اكتب ${p.inputLabel||"ID اللاعب"}`,"e");
   const btn = $("#buyBtn"); busy(btn,true);
@@ -792,12 +886,13 @@ async function buy(p, i){
       const us = await tx.get(uref), ps = await tx.get(doc(db,"products",p.id));
       if (!ps.exists() || ps.data().active===false) throw new Error("المنتج غير متاح حالياً");
       const pd = ps.data(), o = (pd.options||[])[i]; if (!o) throw new Error("الباقة غير متاحة");
-      const bal = us.data().balance || 0;
-      if (bal < o.price) throw new Error("رصيدك غير كافي");
+      const price = priceIn(o.price, wk);
+      const bal = Number((us.data().wallets||{})[wk]) || 0;
+      if (bal < price) throw new Error("رصيد المحفظة غير كافي");
       tx.set(oref, { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", productId:p.id, productName:pd.name,
-        optionIndex:i, optionLabel:o.label, price:o.price, input, no:String(Date.now()).slice(-7),
+        optionIndex:i, optionLabel:o.label, price, wallet:wk, cur:curOf(wk), input, no:String(Date.now()).slice(-7),
         status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-      tx.update(uref, { balance: bal - o.price, lastOrder: oref.id });
+      tx.update(uref, { ["wallets."+wk]: bal - price, lastOrder: oref.id });
     });
     closeSheet(); toast("تم استلام طلبك ✓ سيتم تنفيذه قريباً","s"); S.otab="all"; location.hash="#orders";
   } catch (e) { console.error(e); toast(e.message?.length<60 && !/permission|FirebaseError/i.test(e.message) ? e.message : "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
@@ -814,7 +909,8 @@ window.openOrder = id => {
       <div class="kv"><span>رقم الطلب</span><b class="num">#${esc(o.no)}</b></div>
       <div class="kv"><span>الباقة</span><b>${iso(esc(o.optionLabel||""))}</b></div>
       ${o.input?`<div class="kv"><span>البيانات المدخلة</span><b>${esc(o.input)}</b></div>`:""}
-      <div class="kv"><span>السعر</span><b>${money(o.price)}</b></div>
+      <div class="kv"><span>السعر</span><b>${money(o.price, o.cur)}</b></div>
+      ${o.wallet?`<div class="kv"><span>المحفظة</span><b>${esc(W(o.wallet).name)}</b></div>`:""}
       <div class="kv"><span>التاريخ</span><b>${fdate(o.createdAt)}</b></div>
       ${o.adminNote?`<div class="kv"><span>ملاحظة</span><b>${esc(o.adminNote)}</b></div>`:""}
       ${o.status==="cancelled"?`<div class="kv"><span>الاسترجاع</span><b>${o.refunded?"تم إرجاع المبلغ لمحفظتك":"—"}</b></div>`:""}
@@ -824,33 +920,31 @@ window.openOrder = id => {
 
 /* topup */
 window.openTopup = key => {
-  const pays = S.settings.payments.filter(p=>p.enabled!==false);
-  let cur = pays.find(p=>p.key===key) || pays[0];
-  const body = () => { const st = PM_STYLE[cur.key]||PM_STYLE.other; return `
-    <h3>شحن الرصيد</h3>
-    <div class="tabs">${pays.map(p=>`<button class="${p.key===cur.key?"on":""}" data-pk="${esc(p.key)}">${esc(p.name)}</button>`).join("")}</div>
-    <div class="acc-box"><div class="k"><span style="display:flex;align-items:center;gap:10px"><span class="ic" style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:${st.bg};font-weight:900">${st.t||ic(st.i)}</span><span style="font-weight:800">${esc(cur.name)}</span></span>
+  const ps = pays();
+  let cur = ps.find(p=>p.key===key) || ps.find(p=>p.key===defW()) || ps[0];
+  const body = () => { const st = pst(cur.key); return `
+    <h3>شحن المحفظة</h3>
+    <div class="tabs">${ps.map(p=>`<button class="${p.key===cur.key?"on":""}" data-pk="${esc(p.key)}">${esc(p.name)}</button>`).join("")}</div>
+    <div class="acc-box"><div class="k"><span style="display:flex;align-items:center;gap:10px"><span class="ic" style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:${st.bg};font-weight:900">${wIcon(cur.key)}</span><span style="font-weight:800">${esc(cur.name)}</span></span>
       ${cur.account?`<button class="copy" onclick='cpCopy(${JSON.stringify(cur.account).replace(/'/g,"&#39;")})'>${ic("copy")} نسخ</button>`:""}</div>
       ${cur.account?`<div style="margin-top:10px"><b class="num" style="font-size:17px;word-break:break-all">${esc(cur.account)}</b></div>`:`<p>سيتم إضافة بيانات الحساب قريباً، تواصل مع الدعم</p>`}
       ${cur.note?`<p>${esc(cur.note)}</p>`:""}</div>
     <form id="tpForm">
-      <div class="fld"><label>المبلغ المحوّل (د.ل)</label><input class="inp num" id="tpAmt" type="number" inputmode="decimal" step="0.01" min="1" placeholder="0.00" style="text-align:right" required></div>
-      <div class="fld"><label>${cur.key==="usdt"?"رقم العملية (TxID)":cur.key==="bank"?"اسم المحوّل / رقم الإيصال":"الرقم المحوَّل منه"}</label><input class="inp" id="tpRef" dir="auto" maxlength="200" required></div>
+      <div class="fld"><label>المبلغ (${esc(curOf(cur.key))})</label><input class="inp num" id="tpAmt" type="number" inputmode="decimal" step="0.01" min="1" placeholder="0.00" style="text-align:right" required></div>
       <div class="fld"><label>ملاحظة (اختياري)</label><input class="inp" id="tpNote" maxlength="300"></div>
       <button class="btn btn-p" id="tpBtn">${ic("send")} إرسال طلب الشحن</button>
-      <p style="text-align:center;color:var(--muted);font-size:12.5px;margin-top:10px">يتم إضافة الرصيد لمحفظتك بعد مراجعة التحويل</p>
+      <p style="text-align:center;color:var(--muted);font-size:12.5px;margin-top:10px">يضاف الرصيد لمحفظة ${esc(cur.name)} بعد مراجعة التحويل</p>
     </form>`; };
   const bind = () => {
-    document.querySelectorAll("[data-pk]").forEach(b => b.onclick = () => { cur = pays.find(p=>p.key===b.dataset.pk); $("#sheetBody").innerHTML = body(); bind(); });
+    document.querySelectorAll("[data-pk]").forEach(b => b.onclick = () => { cur = ps.find(p=>p.key===b.dataset.pk); $("#sheetBody").innerHTML = body(); bind(); });
     $("#tpForm").onsubmit = async e => {
       e.preventDefault();
-      const amount = toCents($("#tpAmt").value), ref = $("#tpRef").value.trim();
+      const amount = toCents($("#tpAmt").value);
       if (!(amount>0)) return toast("اكتب مبلغ صحيح","e");
-      if (!ref) return toast("أكمل بيانات التحويل","e");
       const btn = $("#tpBtn"); busy(btn,true);
       try {
         await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
-          amount, ref, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+          wallet:cur.key, cur:curOf(cur.key), amount, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
         closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s");
       } catch(err){ console.error(err); toast("تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
     };
@@ -889,8 +983,8 @@ async function saveInfo(e){
 function notifs(){
   const n = [];
   S.orders.forEach(o => { if (o.status!=="pending") n.push({ t:ms(o.updatedAt), txt:`طلبك ${o.productName} (#${o.no}): ${(STATUS[o.status]||{}).t}`, go:()=>openOrder(o.id) }); });
-  S.topups.forEach(t => { if (t.status!=="pending" && t.method!=="admin") n.push({ t:ms(t.updatedAt), txt:`طلب شحن ${(t.amount/100).toFixed(2)} د.ل: ${t.status==="approved"?"تمت الموافقة ✓":"مرفوض"}` });
-    if (t.method==="admin") n.push({ t:ms(t.createdAt), txt:`${t.amount<0?"تم خصم":"تمت إضافة"} ${(Math.abs(t.amount)/100).toFixed(2)} د.ل ${t.amount<0?"من":"إلى"} رصيدك` }); });
+  S.topups.forEach(t => { if (t.status!=="pending" && t.method!=="admin") n.push({ t:ms(t.updatedAt), txt:`طلب شحن ${(t.amount/100).toFixed(2)} ${t.cur||curOf(t.wallet||t.method)}: ${t.status==="approved"?"تمت الموافقة ✓":"مرفوض"}` });
+    if (t.method==="admin") n.push({ t:ms(t.createdAt), txt:`${t.amount<0?"تم خصم":"تمت إضافة"} ${(Math.abs(t.amount)/100).toFixed(2)} ${curOf(t.wallet)} ${t.amount<0?"من":"إلى"} محفظة ${W(t.wallet).name}` }); });
   S.tickets.forEach(t => { if (t.reply) n.push({ t:ms(t.updatedAt), txt:`رد الدعم على تذكرتك: ${t.type}`, go:()=>{ location.hash="#support"; } }); });
   return n.filter(x=>x.t).sort((a,b)=>b.t-a.t).slice(0,20);
 }
