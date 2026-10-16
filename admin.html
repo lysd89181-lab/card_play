@@ -148,10 +148,10 @@ const iso = s => "\u2068" + s + "\u2069";
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const money = (c, cur="د.ل") => `<span class="num">${((Number(c)||0)/100).toFixed(2)}</span> ${esc(cur)}`;
 const DEF_PAYS = [
-  {key:"libyana",name:"ليبيانا",sub:"محفظة ليبيانا",cur:"د.ل",rate:1,account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
-  {key:"almadar",name:"المدار",sub:"محفظة المدار",cur:"د.ل",rate:1,account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
-  {key:"bank",name:"مصرفي",sub:"محفظة مصرفية",cur:"د.ل",rate:1,account:"",note:"حوّل للحساب واكتب المبلغ",enabled:true},
-  {key:"usdt",name:"USDT",sub:"محفظة USDT",cur:"$",rate:1,account:"",note:"أرسل على شبكة TRC20 فقط",enabled:true}];
+  {key:"libyana",name:"ليبيانا",sub:"محفظة ليبيانا",cur:"د.ل",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
+  {key:"almadar",name:"المدار",sub:"محفظة المدار",cur:"د.ل",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
+  {key:"bank",name:"مصرفي",sub:"محفظة مصرفية",cur:"د.ل",account:"",note:"حوّل للحساب واكتب المبلغ",enabled:true},
+  {key:"usdt",name:"USDT",sub:"محفظة USDT",cur:"$",account:"",note:"أرسل على شبكة TRC20 فقط",enabled:true}];
 const PAYS = () => (D.settings?.payments?.length ? D.settings.payments : DEF_PAYS);
 const WN = k => (PAYS().find(p=>p.key===k)||{}).name || (k==="legacy"?"الرصيد القديم":k||"—");
 const WC = k => (PAYS().find(p=>p.key===k)||{}).cur || "د.ل";
@@ -276,7 +276,7 @@ products(){
   return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pEdit()">+ منتج جديد</button>${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
-    <div class="m">${(p.options||[]).slice(0,4).map(o=>`${esc(o.label)}: ${(o.price/100).toFixed(2)}`).join(" · ")}</div></div>
+    <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
   : `<div class="empty">لا توجد منتجات. أضف منتج أو اضغط "إضافة بيانات تجريبية".</div>`}`;
@@ -311,7 +311,7 @@ settings(){
   const pays = PAYS();
   return `<form id="sf">
   <div class="sec">المحافظ وطرق الدفع</div>
-  <p class="m" style="color:var(--muted);margin:-4px 2px 8px">كل طريقة دفع لها محفظة خاصة. <b>سعر الصرف</b> = كم يدفع العميل من هذي المحفظة مقابل 1 د.ل من سعر المنتج (مثال: ليبيانا 1.25 يعني منتج بـ 10 د.ل يكلف 12.50 من رصيد ليبيانا). خليه 1 لو نفس السعر.</p>
+  <p class="m" style="color:var(--muted);margin:-4px 2px 8px">كل طريقة دفع لها محفظة مستقلة برصيدها. أسعار كل محفظة تحطها في المنتج نفسه.</p>
   ${rows("pays", PAY_F, pays)}
   <div class="sec">قنواتي</div>
   ${rows("chs", CH_F, s.channels||[])}
@@ -326,16 +326,17 @@ settings(){
 };
 
 /* generic row editor */
-const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar","المدار"],["bank","مصرفي"],["usdt","USDT"],["other","أخرى 1"],["other2","أخرى 2"]]],["name","الاسم"],["sub","وصف قصير"],["cur","العملة (د.ل أو $)"],["rate","سعر الصرف","num"],["account","رقم الحساب / المحفظة"],["note","تعليمات للعميل","ta"],["enabled","مفعّل","chk"]];
+const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar","المدار"],["bank","مصرفي"],["usdt","USDT"],["other","أخرى 1"],["other2","أخرى 2"]]],["name","الاسم"],["sub","وصف قصير"],["cur","العملة (د.ل أو $)"],["account","رقم الحساب / المحفظة"],["note","تعليمات للعميل","ta"],["enabled","مفعّل","chk"]];
 const CH_F = [["type","النوع","sel",[["telegram","تيليجرام"],["whatsapp","واتساب"],["instagram","انستقرام"],["facebook","فيسبوك"],["tiktok","تيك توك"],["link","رابط"]]],["title","العنوان"],["handle","اليوزر / الوصف"],["url","الرابط"],["btn","نص الزر (اختياري)"]];
 const FAQ_F = [["q","السؤال"],["a","الجواب","ta"]];
-const OPT_F = [["label","اسم الباقة"],["price","السعر الأساسي د.ل","money"]];
+const optPrice = (o, k) => Number(o?.prices && (k in o.prices) ? o.prices[k] : (o?.price || 0)) || 0;
+const OPT_F_ = () => [["label","اسم الباقة"], ...PAYS().map(p => ["p_"+p.key, `سعر ${p.name} (${p.cur||"د.ل"})`, "money"])];
 function fieldHTML([k,l,t,opts], v){
   if (t==="sel") return `<div class="fld"><label>${l}</label><select class="inp" data-k="${k}">${opts.map(([a,b])=>`<option value="${a}" ${v===a?"selected":""}>${b}</option>`).join("")}</select></div>`;
   if (t==="chk") return `<label class="sw"><input type="checkbox" data-k="${k}" ${v!==false?"checked":""}> ${l}</label>`;
   if (t==="ta") return `<div class="fld"><label>${l}</label><textarea class="inp" data-k="${k}" style="min-height:60px">${esc(v)}</textarea></div>`;
   if (t==="num") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-num="1" type="number" step="0.0001" inputmode="decimal" value="${v!=null&&v!==""?esc(v):"1"}"></div>`;
-  if (t==="money") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-money="1" type="number" step="0.01" inputmode="decimal" value="${v!=null&&v!==""?(v/100).toFixed(2):""}"></div>`;
+  if (t==="money") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-money="1" type="number" step="0.01" inputmode="decimal" value="${v?(v/100).toFixed(2):""}"></div>`;
   return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" value="${esc(v)}"></div>`;
 }
 function rowItem(id, fields, r={}){ return `<div class="ri">${fields.length>2?`<div class="g2">${fields.filter(f=>f[2]!=="ta"&&f[2]!=="chk").map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>f[2]==="ta"||f[2]==="chk").map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
@@ -346,18 +347,17 @@ window.addRow = id => { const box=document.getElementById(id); box.lastElementCh
 window.mvRow = (btn, d) => { const r=btn.closest(".ri"); if(d<0 && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); else if(d>0 && r.nextElementSibling?.classList.contains("ri")) r.parentNode.insertBefore(r.nextElementSibling, r); };
 function readRows(id){
   return [...document.querySelectorAll(`#${id} .ri`)].map(ri => { const o={}; ri.querySelectorAll("[data-k]").forEach(el => {
-    o[el.dataset.k] = el.type==="checkbox" ? el.checked : el.dataset.money ? toCents(el.value) : el.dataset.num ? (parseFloat(el.value)||1) : el.value.trim(); }); return o; });
+    o[el.dataset.k] = el.type==="checkbox" ? el.checked : el.dataset.money ? (el.value.trim()==="" ? 0 : toCents(el.value)) : el.dataset.num ? (parseFloat(el.value)||1) : el.value.trim(); }); return o; });
 }
 
 /* ================= actions ================= */
 const A = {
   users(){ const i=$("#uq"); i.oninput = () => { uq=i.value; draw(); }; },
   settings(){ $("#sf").onsubmit = e => { e.preventDefault(); busy($("#sB"), async () => {
-    const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل", rate:p.rate>0?p.rate:1 }));
+    const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل" }));
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
-    const rates = {}; payments.forEach(p => rates[p.key] = p.rate);
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
-    await setDoc(doc(db,"settings","app"), { payments, rates, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") }, updatedAt:serverTimestamp() });
+    await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 window.reloadUsers = () => loadUsers().then(()=>toast("تم التحديث","s"));
@@ -464,15 +464,18 @@ window.pEdit = id => {
     <div class="g2" id="piBox" ${p.needsInput?"":'style="display:none"'}><div class="fld"><label>عنوان الحقل</label><input class="inp" id="pil" value="${esc(p.inputLabel||"ID اللاعب")}"></div><div class="fld"><label>نص توضيحي</label><input class="inp" id="pih" value="${esc(p.inputHint||"")}" placeholder="مثال: 5123456789"></div></div>
     <label class="sw"><input type="checkbox" id="pa" ${p.active!==false?"checked":""}> ظاهر في الموقع</label>
     <div class="sec">الباقات والأسعار</div>
-    ${rows("popts", OPT_F, p.options||[])}
+    <p class="m" style="color:var(--muted);margin:-4px 2px 8px">حط سعر لكل محفظة. اللي تخليه فاضي، الباقة ما تظهرش لأصحاب المحفظة هذي.</p>
+    ${rows("popts", OPT_F_(), (p.options||[]).map(o => { const r = { label:o.label }; PAYS().forEach(w => { const v = optPrice(o,w.key); if (v) r["p_"+w.key] = v; }); return r; }))}
     <button class="btn btn-p w" id="pB">حفظ المنتج</button>`);
   $("#pi").onchange = () => $("#piBox").style.display = $("#pi").checked ? "" : "none";
   $("#pf").onchange = async () => { const f=$("#pf").files[0]; if(!f) return; img = await fileToDataURL(f, 320, 320, .82); $("#pu").value=""; $("#pv").innerHTML=`<img class="preview" style="width:110px;height:110px" src="${img}">`; };
   $("#pr") && ($("#pr").onclick = () => { img=""; $("#pu").value=""; $("#pv").innerHTML=""; });
   $("#pB").onclick = () => busy($("#pB"), async () => {
     const name = $("#pn").value.trim(); if (!name) throw new Error("اكتب اسم المنتج");
-    const options = readRows("popts").filter(o=>o.label && o.price>0);
-    if (!options.length) throw new Error("أضف باقة واحدة على الأقل بسعر صحيح");
+    const options = readRows("popts").filter(o=>o.label).map(r => { const prices = {};
+      PAYS().forEach(w => { const v = r["p_"+w.key]; if (v > 0) prices[w.key] = v; }); return { label:r.label, prices }; })
+      .filter(o => Object.keys(o.prices).length);
+    if (!options.length) throw new Error("أضف باقة واحدة على الأقل بسعر في محفظة وحدة على الأقل");
     const url = $("#pu").value.trim(); if (url) img = url;
     const data = { name, category:$("#pc").value, sort:Number($("#ps").value)||0, description:$("#pd").value.trim(), image:img,
       needsInput:$("#pi").checked, inputLabel:$("#pil").value.trim(), inputHint:$("#pih").value.trim(), active:$("#pa").checked, options, updatedAt:serverTimestamp() };
@@ -513,7 +516,8 @@ window.bDel = id => { if (confirm("حذف البانر؟")) busy(null, ()=>delet
 /* seed demo data */
 window.seed = () => busy(null, async () => {
   if (!confirm("إضافة منتجات وإعدادات تجريبية؟ (الأسعار تجريبية، عدّلها بعدين)")) return;
-  const P = (name, category, sort, options, needsInput=false, inputLabel="") => ({ name, category, sort, options: options.map(([label,p])=>({label, price:Math.round(p*100)})),
+  const PR = p => ({ libyana:Math.round(p*125), almadar:Math.round(p*125), bank:Math.round(p*100), usdt:Math.round(p*100/7) });
+  const P = (name, category, sort, options, needsInput=false, inputLabel="") => ({ name, category, sort, options: options.map(([label,p])=>({label, prices:PR(p)})),
     needsInput, inputLabel, inputHint:"", description:"", image:"", active:true, createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
   const items = [
     P("PUBG UC","games",1,[["60 UC",6.5],["325 UC",32],["660 UC",63],["1800 UC",160]],true,"ID اللاعب"),
@@ -529,7 +533,7 @@ window.seed = () => busy(null, async () => {
   const b = writeBatch(db);
   items.forEach(it => b.set(doc(collection(db,"products")), it));
   if (!D.settings?.payments?.length) b.set(doc(db,"settings","app"), {
-    payments:DEF_PAYS, rates:{libyana:1,almadar:1,bank:1,usdt:1},
+    payments:DEF_PAYS,
     channels:[{type:"telegram",title:"قناتنا على تيليجرام",handle:"@cardplay",url:"https://t.me/cardplay",btn:""},
       {type:"whatsapp",title:"قناة واتساب",handle:"تواصل معنا مباشرة",url:"https://wa.me/",btn:"افتح"},
       {type:"instagram",title:"حسابنا على انستقرام",handle:"@cardplay",url:"https://instagram.com/cardplay",btn:""},

@@ -8,9 +8,10 @@ service cloud.firestore {
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function userPath(uid) { return /databases/$(db)/documents/users/$(uid); }
     function orderPath(id) { return /databases/$(db)/documents/orders/$(id); }
-    function settingsPath() { return /databases/$(db)/documents/settings/app; }
-    function rateFor(w) {
-      return exists(settingsPath()) ? get(settingsPath()).data.get('rates', {}).get(w, 1) : 1;
+    // price of a package for a given wallet (0 = not available in that wallet)
+    function optPrice(pid, idx, w) {
+      let opt = get(/databases/$(db)/documents/products/$(pid)).data.options[idx];
+      return opt.get('prices', {}).get(w, opt.get('price', 0));
     }
 
     // purchase: exactly one wallet goes down by the price of a NEW order written in the same transaction
@@ -71,7 +72,7 @@ service cloud.firestore {
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.active == true
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.name == request.resource.data.productName
         && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].label == request.resource.data.optionLabel
-        && request.resource.data.price == math.round(float(get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].price) * float(rateFor(request.resource.data.wallet)))
+        && request.resource.data.price == optPrice(request.resource.data.productId, request.resource.data.optionIndex, request.resource.data.wallet)
         && getAfter(userPath(request.auth.uid)).data.lastOrder == oid
         && getAfter(userPath(request.auth.uid)).data.wallets[request.resource.data.wallet] == get(userPath(request.auth.uid)).data.wallets.get(request.resource.data.wallet, 0) - request.resource.data.price;
       allow update, delete: if isAdmin();
