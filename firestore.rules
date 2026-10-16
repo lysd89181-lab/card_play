@@ -81,7 +81,9 @@ service cloud.firestore {
     match /topups/{id} {
       allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
       allow create: if isAdmin() || (signed()
-        && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','wallet','cur','amount','note','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','wallet','cur','amount','fields','shot','note','status','createdAt','updatedAt'])
+        && request.resource.data.fields is map && request.resource.data.fields.size() <= 12
+        && request.resource.data.shot is string && request.resource.data.shot.size() <= 900000
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.method != 'admin'

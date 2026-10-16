@@ -481,10 +481,10 @@ const STATUS = {
 };
 const DEF_SETTINGS = {
   payments: [
-    { key:"libyana", name:"ليبيانا",      sub:"محفظة ليبيانا", cur:"د.ل", rate:1, account:"", note:"", enabled:true },
-    { key:"almadar", name:"المدار",       sub:"محفظة المدار",  cur:"د.ل", rate:1, account:"", note:"", enabled:true },
-    { key:"bank",    name:"مصرفي",        sub:"محفظة مصرفية",  cur:"د.ل", rate:1, account:"", note:"", enabled:true },
-    { key:"usdt",    name:"USDT",         sub:"محفظة USDT",    cur:"$",   rate:1, account:"", note:"", enabled:true }
+    { key:"libyana", name:"ليبيانا", sub:"محفظة ليبيانا", cur:"د.ل", color:"#7B2A9E", account:"", note:"", fields:["sender"], enabled:true },
+    { key:"almadar", name:"المدار",  sub:"محفظة المدار",  cur:"د.ل", color:"#0D74D9", account:"", note:"", fields:["sender"], enabled:true },
+    { key:"bank",    name:"مصرفي",   sub:"محفظة مصرفية",  cur:"د.ل", color:"#2453B8", account:"", note:"", fields:["account","shot"], enabled:true },
+    { key:"usdt",    name:"USDT",    sub:"محفظة USDT",    cur:"$",   color:"#178A6C", account:"", note:"", fields:["txid","shot"], enabled:true }
   ],
   channels: [], support: { whatsapp:"", telegram:"" }, faq: []
 };
@@ -522,7 +522,21 @@ const curOf = k => W(k).cur || "د.ل";
 const wbal = k => Number((S.me?.wallets || {})[k]) || 0;
 const defW = () => { const ps = pays(), d = S.me?.defWallet; return (ps.find(p => p.key === d) || ps[0] || { key:"bank" }).key; };
 const priceFor = (o, k) => Number(o?.prices && (k in o.prices) ? o.prices[k] : (o?.price || 0)) || 0;
-const pst = k => PM_STYLE[k] || PM_STYLE.other;
+function shade(hex, f){ const m = /^#?([0-9a-f]{6})$/i.exec(hex||""); if(!m) return null; const n = parseInt(m[1],16);
+  const c = [n>>16, n>>8&255, n&255].map(x => Math.max(0, Math.min(255, Math.round(f>0 ? x+(255-x)*f : x*(1+f)))));
+  return "#"+c.map(x=>x.toString(16).padStart(2,"0")).join(""); }
+const pst = k => { const base = PM_STYLE[k] || PM_STYLE.other, col = W(k).color;
+  if (!shade(col,0)) return base;
+  return { ...base, bg:`linear-gradient(135deg,${shade(col,.2)},${shade(col,-.2)})`, card:`linear-gradient(140deg,${shade(col,.25)} 0%,${col} 55%,${shade(col,-.45)} 100%)` }; };
+const FIELD_DEF = { sender:{ l:"الرقم المحوَّل منه", t:"tel" }, account:{ l:"رقم الحساب المحوَّل منه", t:"text" }, name:{ l:"اسم المحوِّل", t:"text" },
+  txid:{ l:"رقم العملية (TxID)", t:"text" }, shot:{ l:"صورة الإيصال (سكرين)", t:"image" } };
+function fileToDataURL(file, maxSide, q){
+  return new Promise((res, rej) => { const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => { let w = img.width, h = img.height; const r = Math.min(1, maxSide/Math.max(w,h)); w = Math.round(w*r); h = Math.round(h*r);
+      const c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,w,h); x.drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", q)); };
+    img.onerror = rej; img.src = url; });
+}
 const wIcon = k => { const st = pst(k); return st.t || ic(st.i); };
 
 /* ================= auth UI ================= */
@@ -937,35 +951,47 @@ window.openOrder = id => {
 /* topup */
 window.openTopup = key => {
   const ps = pays();
-  let cur = ps.find(p=>p.key===key) || ps.find(p=>p.key===defW()) || ps[0];
-  const body = () => { const st = pst(cur.key); return `
-    <h3>شحن المحفظة</h3>
-    <div class="tabs">${ps.map(p=>`<button class="${p.key===cur.key?"on":""}" data-pk="${esc(p.key)}">${esc(p.name)}</button>`).join("")}</div>
+  const cur = ps.find(p=>p.key===key) || ps.find(p=>p.key===defW()) || ps[0];
+  const st = pst(cur.key), cc = curOf(cur.key);
+  const fl = [...(cur.fields||[]).filter(f=>FIELD_DEF[f]).map(f=>({ id:f, ...FIELD_DEF[f] })),
+    ...String(cur.extra||"").split("\n").map(x=>x.trim()).filter(Boolean).slice(0,6).map((l,i)=>({ id:"x"+i, l, t:"text" }))];
+  let shot = "";
+  openSheet(`
+    <h3>شحن محفظة ${esc(cur.name)}</h3>
     <div class="acc-box"><div class="k"><span style="display:flex;align-items:center;gap:10px"><span class="ic" style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:${st.bg};font-weight:900">${wIcon(cur.key)}</span><span style="font-weight:800">${esc(cur.name)}</span></span>
       ${cur.account?`<button class="copy" onclick='cpCopy(${JSON.stringify(cur.account).replace(/'/g,"&#39;")})'>${ic("copy")} نسخ</button>`:""}</div>
       ${cur.account?`<div style="margin-top:10px"><b class="num" style="font-size:17px;word-break:break-all">${esc(cur.account)}</b></div>`:`<p>سيتم إضافة بيانات الحساب قريباً، تواصل مع الدعم</p>`}
       ${cur.note?`<p>${esc(cur.note)}</p>`:""}</div>
     <form id="tpForm">
-      <div class="fld"><label>المبلغ (${esc(curOf(cur.key))})</label><input class="inp num" id="tpAmt" type="number" inputmode="decimal" step="0.01" min="1" placeholder="0.00" style="text-align:right" required></div>
+      <div class="fld"><label>القيمة (${esc(cc)})</label><input class="inp num" id="tpAmt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00" style="text-align:right" required></div>
+      ${fl.map(f => f.t==="image" ? `<div class="fld"><label>${esc(f.l)}</label>
+          <label class="btn btn-o" style="cursor:pointer">${ic("plus")} اختر صورة<input type="file" accept="image/*" id="tpShot" hidden></label>
+          <div id="tpShotV" style="margin-top:8px"></div></div>`
+        : `<div class="fld"><label>${esc(f.l)}</label><input class="inp ${f.t==="tel"?"num":""}" data-tf="${esc(f.l)}" ${f.t==="tel"?'type="tel" inputmode="tel" style="text-align:right"':'dir="auto"'} maxlength="150" required></div>`).join("")}
       <div class="fld"><label>ملاحظة (اختياري)</label><input class="inp" id="tpNote" maxlength="300"></div>
       <button class="btn btn-p" id="tpBtn">${ic("send")} إرسال طلب الشحن</button>
       <p style="text-align:center;color:var(--muted);font-size:12.5px;margin-top:10px">يضاف الرصيد لمحفظة ${esc(cur.name)} بعد مراجعة التحويل</p>
-    </form>`; };
-  const bind = () => {
-    document.querySelectorAll("[data-pk]").forEach(b => b.onclick = () => { cur = ps.find(p=>p.key===b.dataset.pk); $("#sheetBody").innerHTML = body(); bind(); });
-    $("#tpForm").onsubmit = async e => {
-      e.preventDefault();
-      const amount = toCents($("#tpAmt").value);
-      if (!(amount>0)) return toast("اكتب مبلغ صحيح","e");
-      const btn = $("#tpBtn"); busy(btn,true);
-      try {
-        await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
-          wallet:cur.key, cur:curOf(cur.key), amount, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-        closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s");
-      } catch(err){ console.error(err); toast("تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
-    };
+    </form>`);
+  const si = $("#tpShot");
+  if (si) si.onchange = async () => { const f = si.files[0]; if (!f) return;
+    try { shot = await fileToDataURL(f, 1100, .7); if (shot.length > 700000) shot = await fileToDataURL(f, 800, .55);
+      $("#tpShotV").innerHTML = `<img src="${shot}" style="max-width:100%;max-height:220px;border-radius:12px;border:1px solid var(--line)">`; }
+    catch { toast("تعذر قراءة الصورة","e"); } };
+  $("#tpForm").onsubmit = async e => {
+    e.preventDefault();
+    const amount = toCents($("#tpAmt").value);
+    if (!(amount>0)) return toast("اكتب القيمة","e");
+    const fields = {}; let miss = "";
+    document.querySelectorAll("[data-tf]").forEach(el => { const v = el.value.trim(); if (!v && !miss) miss = el.dataset.tf; fields[el.dataset.tf] = v; });
+    if (miss) return toast(`اكتب ${miss}`,"e");
+    if (si && !shot) return toast("ارفع صورة الإيصال","e");
+    const btn = $("#tpBtn"); busy(btn,true);
+    try {
+      await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
+        wallet:cur.key, cur:cc, amount, fields, shot, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+      closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s");
+    } catch(err){ console.error(err); toast("تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
   };
-  openSheet(body()); bind();
 };
 
 /* tickets */

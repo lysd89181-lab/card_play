@@ -148,10 +148,10 @@ const iso = s => "\u2068" + s + "\u2069";
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const money = (c, cur="د.ل") => `<span class="num">${((Number(c)||0)/100).toFixed(2)}</span> ${esc(cur)}`;
 const DEF_PAYS = [
-  {key:"libyana",name:"ليبيانا",sub:"محفظة ليبيانا",cur:"د.ل",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
-  {key:"almadar",name:"المدار",sub:"محفظة المدار",cur:"د.ل",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",enabled:true},
-  {key:"bank",name:"مصرفي",sub:"محفظة مصرفية",cur:"د.ل",account:"",note:"حوّل للحساب واكتب المبلغ",enabled:true},
-  {key:"usdt",name:"USDT",sub:"محفظة USDT",cur:"$",account:"",note:"أرسل على شبكة TRC20 فقط",enabled:true}];
+  {key:"libyana",name:"ليبيانا",sub:"محفظة ليبيانا",cur:"د.ل",color:"#7B2A9E",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",fields:["sender"],extra:"",enabled:true},
+  {key:"almadar",name:"المدار",sub:"محفظة المدار",cur:"د.ل",color:"#0D74D9",account:"",note:"حوّل الرصيد للرقم واكتب المبلغ",fields:["sender"],extra:"",enabled:true},
+  {key:"bank",name:"مصرفي",sub:"محفظة مصرفية",cur:"د.ل",color:"#2453B8",account:"",note:"حوّل للحساب وارفع صورة الإيصال",fields:["account","shot"],extra:"",enabled:true},
+  {key:"usdt",name:"USDT",sub:"محفظة USDT",cur:"$",color:"#178A6C",account:"",note:"أرسل على شبكة TRC20 فقط",fields:["txid","shot"],extra:"",enabled:true}];
 const PAYS = () => (D.settings?.payments?.length ? D.settings.payments : DEF_PAYS);
 const WN = k => (PAYS().find(p=>p.key===k)||{}).name || (k==="legacy"?"الرصيد القديم":k||"—");
 const WC = k => (PAYS().find(p=>p.key===k)||{}).cur || "د.ل";
@@ -266,6 +266,8 @@ topups(){
     <span class="badge ${t.status==="approved"?"b-done":t.status==="rejected"?"b-canc":"b-pend"}">${t.status==="approved"?"مقبول":t.status==="rejected"?"مرفوض":"معلّق"}</span></div>
     <div class="kv"><span>العميل:</span><b>${esc(t.uName)} (<span class="num">${esc(t.uShort)}</span>)</b></div>
     ${t.ref?`<div class="kv"><span>المرجع:</span><b class="num">${esc(t.ref)}</b>${cpb(t.ref)}</div>`:""}
+    ${Object.entries(t.fields||{}).map(([k,v])=>`<div class="kv"><span>${esc(k)}:</span><b class="num">${esc(v)}</b>${cpb(v)}</div>`).join("")}
+    ${t.shot?`<div style="margin-top:8px"><img src="${esc(t.shot)}" alt="" style="max-width:140px;max-height:140px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewShot('${t.id}')"></div>`:""}
     ${t.note?`<div class="kv"><span>ملاحظة:</span><b>${esc(t.note)}</b></div>`:""}
     ${t.adminNote?`<div class="kv"><span>سبب الرفض:</span><b>${esc(t.adminNote)}</b></div>`:""}
     ${t.status==="pending"?`<div class="acts"><button class="btn btn-ok" onclick="tApprove('${t.id}')">قبول وإضافة الرصيد</button><button class="btn btn-x" onclick="tReject('${t.id}')">رفض</button></div>`:""}
@@ -326,20 +328,24 @@ settings(){
 };
 
 /* generic row editor */
-const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar","المدار"],["bank","مصرفي"],["usdt","USDT"],["other","أخرى 1"],["other2","أخرى 2"]]],["name","الاسم"],["sub","وصف قصير"],["cur","العملة (د.ل أو $)"],["account","رقم الحساب / المحفظة"],["note","تعليمات للعميل","ta"],["enabled","مفعّل","chk"]];
+const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar","المدار"],["bank","مصرفي"],["usdt","USDT"],["other","أخرى 1"],["other2","أخرى 2"]]],["name","الاسم"],["sub","وصف قصير"],["cur","العملة (د.ل أو $)"],["color","لون الكرت","color"],["account","رقم الحساب / المحفظة"],["note","تعليمات للعميل","ta"],
+  ["fields","الحقول المطلوبة عند الشحن (المبلغ دايماً موجود)","multi",[["sender","الرقم المحوَّل منه"],["account","رقم الحساب المحوَّل منه"],["name","اسم المحوِّل"],["txid","رقم العملية TxID"],["shot","صورة الإيصال (سكرين)"]]],
+  ["extra","حقول إضافية — اكتب كل حقل في سطر (اختياري)","ta"],["enabled","مفعّل","chk"]];
 const CH_F = [["type","النوع","sel",[["telegram","تيليجرام"],["whatsapp","واتساب"],["instagram","انستقرام"],["facebook","فيسبوك"],["tiktok","تيك توك"],["link","رابط"]]],["title","العنوان"],["handle","اليوزر / الوصف"],["url","الرابط"],["btn","نص الزر (اختياري)"]];
 const FAQ_F = [["q","السؤال"],["a","الجواب","ta"]];
 const optPrice = (o, k) => Number(o?.prices && (k in o.prices) ? o.prices[k] : (o?.price || 0)) || 0;
 const OPT_F_ = () => [["label","اسم الباقة"], ...PAYS().map(p => ["p_"+p.key, `سعر ${p.name} (${p.cur||"د.ل"})`, "money"])];
 function fieldHTML([k,l,t,opts], v){
   if (t==="sel") return `<div class="fld"><label>${l}</label><select class="inp" data-k="${k}">${opts.map(([a,b])=>`<option value="${a}" ${v===a?"selected":""}>${b}</option>`).join("")}</select></div>`;
+  if (t==="color") return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" type="color" value="${esc(v||"#2453B8")}" style="height:44px;padding:4px"></div>`;
+  if (t==="multi") { const arr = Array.isArray(v) ? v : []; return `<div class="fld"><label>${l}</label><div style="display:flex;flex-wrap:wrap;gap:4px 14px">${opts.map(([a,b])=>`<label class="sw" style="margin:0"><input type="checkbox" data-k="${k}" data-mv="${a}" ${arr.includes(a)?"checked":""}> ${b}</label>`).join("")}</div></div>`; }
   if (t==="chk") return `<label class="sw"><input type="checkbox" data-k="${k}" ${v!==false?"checked":""}> ${l}</label>`;
   if (t==="ta") return `<div class="fld"><label>${l}</label><textarea class="inp" data-k="${k}" style="min-height:60px">${esc(v)}</textarea></div>`;
   if (t==="num") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-num="1" type="number" step="0.0001" inputmode="decimal" value="${v!=null&&v!==""?esc(v):"1"}"></div>`;
   if (t==="money") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-money="1" type="number" step="0.01" inputmode="decimal" value="${v?(v/100).toFixed(2):""}"></div>`;
   return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" value="${esc(v)}"></div>`;
 }
-function rowItem(id, fields, r={}){ return `<div class="ri">${fields.length>2?`<div class="g2">${fields.filter(f=>f[2]!=="ta"&&f[2]!=="chk").map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>f[2]==="ta"||f[2]==="chk").map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
+function rowItem(id, fields, r={}){ return `<div class="ri">${fields.length>2?`<div class="g2">${fields.filter(f=>!["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
   <div style="display:flex;gap:6px"><button type="button" class="btn btn-o" onclick="mvRow(this,-1)">▲</button><button type="button" class="btn btn-o" onclick="mvRow(this,1)">▼</button><button type="button" class="btn btn-x" onclick="this.closest('.ri').remove()">حذف</button></div></div>`; }
 function rows(id, fields, arr){ ROWF[id]=fields; return `<div class="rows-box" id="${id}">${arr.map(r=>rowItem(id,fields,r)).join("")}<button type="button" class="btn btn-o" onclick="addRow('${id}')">+ إضافة</button></div>`; }
 const ROWF = {};
@@ -347,6 +353,7 @@ window.addRow = id => { const box=document.getElementById(id); box.lastElementCh
 window.mvRow = (btn, d) => { const r=btn.closest(".ri"); if(d<0 && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); else if(d>0 && r.nextElementSibling?.classList.contains("ri")) r.parentNode.insertBefore(r.nextElementSibling, r); };
 function readRows(id){
   return [...document.querySelectorAll(`#${id} .ri`)].map(ri => { const o={}; ri.querySelectorAll("[data-k]").forEach(el => {
+    if (el.dataset.mv) { o[el.dataset.k] = o[el.dataset.k] || []; if (el.checked) o[el.dataset.k].push(el.dataset.mv); return; }
     o[el.dataset.k] = el.type==="checkbox" ? el.checked : el.dataset.money ? (el.value.trim()==="" ? 0 : toCents(el.value)) : el.dataset.num ? (parseFloat(el.value)||1) : el.value.trim(); }); return o; });
 }
 
@@ -388,10 +395,13 @@ window.oCancel = id => {
     closeSheet(); toast("تم الإلغاء والاسترجاع ✓","s");
   });
 };
+window.viewShot = id => { const t = D.topups.find(x=>x.id===id); openSheet(`<h3>صورة الإيصال<button class="btn btn-o" onclick="closeSheet()">✕</button></h3><img src="${esc(t.shot)}" style="width:100%;border-radius:12px">`); };
 window.tApprove = id => {
   const t = D.topups.find(x=>x.id===id);
   openSheet(`<h3>قبول طلب الشحن<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <p style="margin-bottom:10px">${esc(t.uName)} (<span class="num">${esc(t.uShort)}</span>) · محفظة ${esc(t.methodName)}${t.note?` · ${esc(t.note)}`:""}</p>
+    ${Object.entries(t.fields||{}).map(([k,v])=>`<div class="kv"><span>${esc(k)}:</span><b class="num">${esc(v)}</b></div>`).join("")}
+    ${t.shot?`<img src="${esc(t.shot)}" style="width:100%;max-height:340px;object-fit:contain;border-radius:12px;margin:10px 0;border:1px solid var(--line)">`:""}
     <div class="fld"><label>المبلغ الذي سيضاف (${esc(t.cur||WC(t.wallet||t.method))}) — عدّله لو المحوَّل مختلف</label><input class="inp num" id="ta" type="number" step="0.01" value="${(t.amount/100).toFixed(2)}"></div>
     <button class="btn btn-ok w" id="aB">قبول وإضافة الرصيد</button>`);
   $("#aB").onclick = () => busy($("#aB"), async () => {
