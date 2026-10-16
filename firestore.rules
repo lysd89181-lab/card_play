@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signed() { return request.auth != null; }
+    function isAdmin() { return signed() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
+    function me(uid) { return signed() && request.auth.uid == uid; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function userPath(uid) { return /databases/$(db)/documents/users/$(uid); }
+    function orderPath(id) { return /databases/$(db)/documents/orders/$(id); }
+
+    match /admins/{uid} {
+      allow read: if me(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /settings/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /banners/{id}  { allow read: if true; allow write: if isAdmin(); }
+    match /products/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    match /users/{uid} {
+      allow read: if me(uid) || isAdmin();
+      allow create: if me(uid)
+        && request.resource.data.keys().hasOnly(['name','email','phone','photo','short','balance','createdAt'])
+        && request.resource.data.balance == 0
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+      allow update: if isAdmin() || (me(uid) && (
+          // profile edit
+          (changed().hasOnly(['name','phone'])
+            && request.resource.data.name is string && request.resource.data.name.size() <= 60
+            && request.resource.data.phone is string && request.resource.data.phone.size() <= 20)
+          // purchase: balance goes down by exactly the price of a NEW order created in the same write
+          || (changed().hasOnly(['balance','lastOrder'])
+            && request.resource.data.balance is int
+            && request.resource.data.balance >= 0
+            && !exists(orderPath(request.resource.data.lastOrder))
+            && getAfter(orderPath(request.resource.data.lastOrder)).data.uid == uid
+            && getAfter(orderPath(request.resource.data.lastOrder)).data.price == resource.data.balance - request.resource.data.balance)
+        ));
+      allow delete: if false;
+    }
+
+    match /orders/{oid} {
+      allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
+      allow create: if signed()
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','productId','productName','optionIndex','optionLabel','price','input','no','status','createdAt','updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.price is int && request.resource.data.price > 0
+        && request.resource.data.input is string && request.resource.data.input.size() <= 200
+        && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.active == true
+        && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.name == request.resource.data.productName
+        && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].price == request.resource.data.price
+        && get(/databases/$(db)/documents/products/$(request.resource.data.productId)).data.options[request.resource.data.optionIndex].label == request.resource.data.optionLabel
+        && getAfter(userPath(request.auth.uid)).data.lastOrder == oid
+        && getAfter(userPath(request.auth.uid)).data.balance == get(userPath(request.auth.uid)).data.balance - request.resource.data.price;
+      allow update, delete: if isAdmin();
+    }
+
+    match /topups/{id} {
+      allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
+      allow create: if isAdmin() || (signed()
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','amount','ref','note','status','createdAt','updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.method != 'admin'
+        && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
+        && request.resource.data.ref is string && request.resource.data.ref.size() <= 200
+        && request.resource.data.note is string && request.resource.data.note.size() <= 300);
+      allow update, delete: if isAdmin();
+    }
+
+    match /tickets/{id} {
+      allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
+      allow create: if signed()
+        && request.resource.data.keys().hasOnly(['uid','uName','uShort','type','message','status','reply','createdAt','updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.reply == ''
+        && request.resource.data.message is string && request.resource.data.message.size() <= 1500;
+      allow update, delete: if isAdmin();
+    }
+
+    // everything else (old project data) is closed
+    match /{document=**} { allow read, write: if false; }
+  }
+}
