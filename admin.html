@@ -42,6 +42,21 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .card b.h{font-size:15px;font-weight:800;display:block}
 .card .m{font-size:12.5px;color:var(--muted)}
 .card .acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.stabs{position:sticky;top:52px;z-index:4;background:rgba(5,10,22,.92);padding:6px 0;margin-bottom:10px}
+.stabs button{font-size:13.5px;padding:7px 14px}
+.spane{animation:none}
+.rc{border:1px solid var(--line);border-radius:14px;margin-bottom:8px;background:rgba(10,22,46,.5);padding:0!important}
+.rows-box .rc{border-bottom:1px solid var(--line)}
+.rc summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 14px;font-weight:800}
+.rc summary::-webkit-details-marker{display:none}
+.rc summary small{color:var(--muted);font-weight:600;font-size:12px;margin-inline-start:4px}
+.rc summary .chev{margin-inline-start:auto;color:var(--muted);transition:.2s}
+.rc[open] summary .chev{transform:rotate(180deg)}
+.rc .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.15)}
+.rc-b{padding:4px 14px 12px;border-top:1px solid var(--line)}
+.rows-box{border:none;padding:0}
+.box2{border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(10,22,46,.5)}
+.savebar{position:sticky;bottom:0;padding:10px 0 calc(6px + var(--safe-b));background:linear-gradient(transparent,rgba(5,10,22,.95) 30%);z-index:3}
 .wrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wchip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:9px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .wchip.on{color:#4ADE80;border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.1)}
@@ -114,7 +129,7 @@ textarea.inp{min-height:80px;resize:vertical}
   <section id="noadmin" class="login hidden">
     <img src="img/mark.png" alt="">
     <h2>هذا الحساب ليس أدمن</h2>
-    <p style="color:var(--muted);margin-bottom:10px">انسخ الـ UID هذا وأضفه في Firestore داخل مجموعة <b>admins</b> كمستند بنفس الاسم.</p>
+    <p style="color:var(--muted);margin-bottom:10px">هذا الحساب ما عندهش صلاحية الدخول للوحة التحكم. ابعت الرمز هذا للدعم الفني باش يفعّلولك الصلاحية.</p>
     <div class="card" style="text-align:center"><b class="num" id="myUid" style="word-break:break-all"></b><div style="margin-top:8px"><button class="cp" id="cpUid">نسخ</button></div></div>
     <button class="btn btn-o w" id="out2">تسجيل الخروج</button>
   </section>
@@ -178,7 +193,7 @@ const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn()
 const CATS = { games:"ألعاب", cards:"بطاقات", subs:"اشتراكات" };
 const STATUS = { pending:["قيد التنفيذ","b-pend"], processing:["جاري التنفيذ","b-proc"], done:["مكتمل","b-done"], cancelled:["ملغي","b-canc"] };
 
-/* image → small data URL (no Firebase Storage needed) */
+/* image → small data URL */
 function fileToDataURL(file, maxW, maxH, q=0.82){
   return new Promise((res, rej) => {
     const img = new Image(), url = URL.createObjectURL(file);
@@ -199,6 +214,7 @@ $("#out").onclick = $("#out2").onclick = () => signOut(auth);
 $("#cpUid").onclick = () => copy($("#myUid").textContent);
 
 const D = { orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
+let stab = "wallets";
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
@@ -262,7 +278,7 @@ $("#nBtn").onclick = async () => {
   lsS("cp_admin_notif","1"); await getSW(); nBtnUI(); beep();
   let r = "err"; try { r = await fcmRegister(); } catch(e){ console.error(e); }
   if (r === "ok") notify("تم تفعيل الإشعارات ✓", "توصلك إشعارات الطلبات والشحن حتى والمتصفح مسكّر", "welcome");
-  else if (r === "nokey") { notify("تم تفعيل الإشعارات ✓", "تشتغل طول ما اللوحة مفتوحة", "welcome"); toast("للإشعارات والمتصفح مسكّر: حط رابط الـ Worker ومفتاح VAPID في الإعدادات","e"); }
+  else if (r === "nokey") { notify("تم تفعيل الإشعارات ✓", "تشتغل طول ما اللوحة مفتوحة", "welcome"); toast("الإشعارات الخارجية مش مفعّلة بعد، تواصل مع الدعم الفني","e"); }
   else toast("الإشعارات تشتغل واللوحة مفتوحة بس (الجهاز ما قبلش الإشعارات الخارجية)","e");
 };
 let actx;
@@ -388,21 +404,29 @@ tickets(){
 settings(){
   const s = D.settings || {};
   const pays = PAYS();
+  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["support","الدعم والأسئلة"]];
   return `<form id="sf">
-  <div class="sec">المحافظ وطرق الدفع</div>
-  <p class="m" style="color:var(--muted);margin:-4px 2px 8px">كل طريقة دفع لها محفظة مستقلة برصيدها. أسعار كل محفظة تحطها في المنتج نفسه.</p>
-  ${rows("pays", PAY_F, pays)}
-  <div class="sec">قنواتي</div>
-  ${rows("chs", CH_F, s.channels||[])}
-  <div class="sec">إشعارات الأدمن (حتى والمتصفح مسكّر)</div>
-  <div class="fld"><label>رابط الـ Worker</label><input class="inp" id="sPushW" dir="ltr" value="${esc(s.push?.worker||"")}" placeholder="https://cardplay-notify.xxxx.workers.dev"></div>
-  <div class="fld"><label>مفتاح Web Push (VAPID key)</label><input class="inp" id="sPushV" dir="ltr" value="${esc(s.push?.vapid||"")}" placeholder="BExxxx..."></div>
-  <div class="sec">أرقام الدعم</div>
-  <div class="g2"><div class="fld"><label>واتساب (بالمفتاح الدولي)</label><input class="inp num" id="sWa" value="${esc(s.support?.whatsapp||"")}" placeholder="218912345678"></div>
-  <div class="fld"><label>يوزر تيليجرام</label><input class="inp num" id="sTg" value="${esc(s.support?.telegram||"")}" placeholder="cardplay"></div></div>
-  <div class="sec">الأسئلة الشائعة</div>
-  ${rows("faq", FAQ_F, s.faq||[])}
-  <button class="btn btn-p w" id="sB" style="margin-top:8px">حفظ الإعدادات</button>
+  <div class="chips stabs">${ST.map(([k,t])=>`<button type="button" class="${stab===k?"on":""}" data-st="${k}">${t}</button>`).join("")}</div>
+
+  <div class="spane" data-pane="wallets" ${stab==="wallets"?"":"hidden"}>
+    <p class="m" style="color:var(--muted);margin:0 2px 10px">كل طريقة دفع لها محفظة مستقلة برصيدها. اضغط على أي محفظة باش تفتح إعداداتها. أسعار كل محفظة تتحط في المنتج نفسه.</p>
+    ${rows("pays", PAY_F, pays, r => `<span class="dot" style="background:${esc(r.color||"#2453B8")}"></span>${esc(r.name||"محفظة جديدة")}<small>${esc(r.cur||"")}${r.enabled===false?" · موقوفة":""}</small>`)}
+  </div>
+
+  <div class="spane" data-pane="channels" ${stab==="channels"?"":"hidden"}>
+    <p class="m" style="color:var(--muted);margin:0 2px 10px">القنوات اللي تظهر للزبائن في صفحة «قنواتي».</p>
+    ${rows("chs", CH_F, s.channels||[], r => `${esc(r.title||"قناة جديدة")}<small>${esc(r.handle||"")}</small>`)}
+  </div>
+
+  <div class="spane" data-pane="support" ${stab==="support"?"":"hidden"}>
+    <div class="box2"><div class="sec" style="margin-top:0">أرقام الدعم</div>
+    <div class="g2"><div class="fld"><label>واتساب (بالمفتاح الدولي)</label><input class="inp num" id="sWa" value="${esc(s.support?.whatsapp||"")}" placeholder="218912345678"></div>
+    <div class="fld"><label>يوزر تيليجرام</label><input class="inp num" id="sTg" value="${esc(s.support?.telegram||"")}" placeholder="cardplay"></div></div></div>
+    <div class="sec">الأسئلة الشائعة</div>
+    ${rows("faq", FAQ_F, s.faq||[], r => `${esc(r.q||"سؤال جديد")}`)}
+  </div>
+
+  <div class="savebar"><button class="btn btn-p w" id="sB">حفظ الإعدادات</button></div>
   </form>`;
 }
 };
@@ -425,11 +449,15 @@ function fieldHTML([k,l,t,opts], v){
   if (t==="money") return `<div class="fld"><label>${l}</label><input class="inp num" data-k="${k}" data-money="1" type="number" step="0.01" inputmode="decimal" value="${v?(v/100).toFixed(2):""}"></div>`;
   return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" value="${esc(v)}"></div>`;
 }
-function rowItem(id, fields, r={}){ return `<div class="ri">${fields.length>2?`<div class="g2">${fields.filter(f=>!["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
-  <div style="display:flex;gap:6px"><button type="button" class="btn btn-o" onclick="mvRow(this,-1)">▲</button><button type="button" class="btn btn-o" onclick="mvRow(this,1)">▼</button><button type="button" class="btn btn-x" onclick="this.closest('.ri').remove()">حذف</button></div></div>`; }
-function rows(id, fields, arr){ ROWF[id]=fields; return `<div class="rows-box" id="${id}">${arr.map(r=>rowItem(id,fields,r)).join("")}<button type="button" class="btn btn-o" onclick="addRow('${id}')">+ إضافة</button></div>`; }
-const ROWF = {};
-window.addRow = id => { const box=document.getElementById(id); box.lastElementChild.insertAdjacentHTML("beforebegin", rowItem(id, ROWF[id])); };
+function rowItem(id, fields, r={}, isNew){
+  const tf = ROWT[id];
+  if (tf) return `<details class="ri rc" ${isNew?"open":""}><summary>${tf(r)}<span class="chev">▾</span></summary><div class="rc-b">${rowBody(id, fields, r)}</div></details>`;
+  return `<div class="ri">${rowBody(id, fields, r)}</div>`; }
+function rowBody(id, fields, r){ return `${fields.length>2?`<div class="g2">${fields.filter(f=>!["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
+  <div style="display:flex;gap:6px"><button type="button" class="btn btn-o" onclick="mvRow(this,-1)">▲</button><button type="button" class="btn btn-o" onclick="mvRow(this,1)">▼</button><button type="button" class="btn btn-x" onclick="if(confirm('حذف؟'))this.closest('.ri').remove()">حذف</button></div>`; }
+function rows(id, fields, arr, titleFn){ ROWF[id]=fields; ROWT[id]=titleFn||null; return `<div class="rows-box" id="${id}">${arr.map(r=>rowItem(id,fields,r)).join("")}<button type="button" class="btn btn-o" onclick="addRow('${id}')">+ إضافة</button></div>`; }
+const ROWF = {}, ROWT = {};
+window.addRow = id => { const box=document.getElementById(id); box.lastElementChild.insertAdjacentHTML("beforebegin", rowItem(id, ROWF[id], {}, true)); };
 window.mvRow = (btn, d) => { const r=btn.closest(".ri"); if(d<0 && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); else if(d>0 && r.nextElementSibling?.classList.contains("ri")) r.parentNode.insertBefore(r.nextElementSibling, r); };
 function readRows(id){
   return [...document.querySelectorAll(`#${id} .ri`)].map(ri => { const o={}; ri.querySelectorAll("[data-k]").forEach(el => {
@@ -440,12 +468,16 @@ function readRows(id){
 /* ================= actions ================= */
 const A = {
   users(){ const i=$("#uq"); i.oninput = () => { uq=i.value; draw(); }; },
-  settings(){ $("#sf").onsubmit = e => { e.preventDefault(); busy($("#sB"), async () => {
+  settings(){
+    document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { stab = b.dataset.st;
+      document.querySelectorAll("[data-st]").forEach(x => x.classList.toggle("on", x===b));
+      document.querySelectorAll(".spane").forEach(p => p.hidden = p.dataset.pane !== stab); });
+    $("#sf").onsubmit = e => { e.preventDefault(); busy($("#sB"), async () => {
     const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل" }));
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
     await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
-      push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() }, updatedAt:serverTimestamp() });
+      push: D.settings?.push || {}, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 

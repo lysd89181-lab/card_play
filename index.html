@@ -625,7 +625,7 @@ onAuthStateChanged(auth, async u => {
   S.unsubs.forEach(f => f()); S.unsubs = [];
   S.user = u; S.me = null; S.orders = []; S.topups = []; S.tickets = [];
   if (!u) { show("auth"); busy($("#aBtn"), false, mode==="reg"?"إنشاء حساب":"تسجيل الدخول"); return; }
-  try { await ensureUserDoc(u); } catch (e) { console.error(e); toast("تعذر تجهيز الحساب: تحقق من قواعد Firestore","e"); }
+  try { await ensureUserDoc(u); } catch (e) { console.error(e); toast("تعذر تجهيز الحساب، حاول مرة أخرى","e"); }
   const mine = c => query(collection(db, c), where("uid","==",u.uid));
   S.unsubs.push(
     onSnapshot(doc(db,"users",u.uid), s => { S.me = s.exists() ? { id:s.id, ...s.data() } : null; render(); }),
@@ -995,7 +995,7 @@ window.openTopup = key => {
   };
 };
 
-/* admin push ping (worker sends the notification) */
+/* admin alert ping */
 function pingAdmin(type, id){
   const u = S.settings?.push?.worker; if (!u || !/^https:\/\//.test(u)) return;
   try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ type, id }), keepalive:true }).catch(()=>{}); } catch {}
