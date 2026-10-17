@@ -7,6 +7,10 @@
 <meta name="robots" content="noindex">
 <title>لوحة التحكم — Card Play</title>
 <link rel="icon" href="img/icon-192.png">
+<link rel="manifest" href="admin.webmanifest">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="لوحة التحكم">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap">
@@ -19,7 +23,7 @@ body{font-family:'Cairo',system-ui,sans-serif;color:var(--text);font-size:14.5px
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
 a{color:inherit;text-decoration:none}
 input,select,textarea{font:inherit;color:inherit}
-.hidden{display:none!important}
+.hidden,[hidden]{display:none!important}
 .num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
 .wrap{max-width:1000px;margin:0 auto;padding:14px 14px calc(30px + var(--safe-b))}
 header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
@@ -128,9 +132,8 @@ textarea.inp{min-height:80px;resize:vertical}
 
   <section id="noadmin" class="login hidden">
     <img src="img/mark.png" alt="">
-    <h2>هذا الحساب ليس أدمن</h2>
-    <p style="color:var(--muted);margin-bottom:10px">هذا الحساب ما عندهش صلاحية الدخول للوحة التحكم. ابعت الرمز هذا للدعم الفني باش يفعّلولك الصلاحية.</p>
-    <div class="card" style="text-align:center"><b class="num" id="myUid" style="word-break:break-all"></b><div style="margin-top:8px"><button class="cp" id="cpUid">نسخ</button></div></div>
+    <h2>ليس لديك صلاحية الدخول</h2>
+    <p style="color:var(--muted);margin-bottom:14px">هذا الحساب غير مسجّل كمدير أو موظف في لوحة التحكم.</p>
     <button class="btn btn-o w" id="out2">تسجيل الخروج</button>
   </section>
 
@@ -188,9 +191,9 @@ const cpb = v => v ? ` <button class="cp" onclick='cp(${JSON.stringify(String(v)
 const openSheet = h => { $("#sh").innerHTML = h; $("#sh").classList.add("on"); $("#sbg").classList.add("on"); $("#sh").scrollTop=0; };
 const closeSheet = () => { openUser = null; $("#sh").classList.remove("on"); $("#sbg").classList.remove("on"); };
 window.closeSheet = closeSheet; $("#sbg").onclick = closeSheet;
-const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch(e){ console.error(e); toast(e.message && e.message.length<70 && !/FirebaseError|permission/i.test(e.message) ? e.message : "حدث خطأ: تحقق من الصلاحيات","e"); } if (btn) btn.disabled = false; };
+const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch(e){ console.error(e); toast(e.message && e.message.length<70 && !/FirebaseError|permission/i.test(e.message) ? e.message : "حدث خطأ في قاعدة البيانات","e"); } if (btn) btn.disabled = false; };
 
-const CATS = { games:"ألعاب", cards:"بطاقات", subs:"اشتراكات" };
+const CATS = { games:"ألعاب", cards:"بطاقات", subs:"اشتراكات", apps:"تطبيقات" };
 const STATUS = { pending:["قيد التنفيذ","b-pend"], processing:["جاري التنفيذ","b-proc"], done:["مكتمل","b-done"], cancelled:["ملغي","b-canc"] };
 
 /* image → small data URL */
@@ -211,20 +214,21 @@ function fileToDataURL(file, maxW, maxH, q=0.82){
 $("#lf").onsubmit = async e => { e.preventDefault(); $("#lErr").textContent=""; try{ await signInWithEmailAndPassword(auth,$("#lE").value.trim(),$("#lP").value); }catch(err){ $("#lErr").textContent="بيانات الدخول غير صحيحة"; } };
 $("#gB").onclick = async () => { const p=new GoogleAuthProvider(); try{ await signInWithPopup(auth,p);}catch(err){ if(err.code==="auth/popup-blocked") signInWithRedirect(auth,p); else $("#lErr").textContent="تعذر الدخول بـ Google"; } };
 $("#out").onclick = $("#out2").onclick = () => signOut(auth);
-$("#cpUid").onclick = () => copy($("#myUid").textContent);
 
-const D = { orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
-let stab = "wallets";
+const D = { staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
+let stab = "wallets", stq = "";
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
 onAuthStateChanged(auth, async u => {
   unsubs.forEach(f=>f()); unsubs=[]; for (const k in seenFirst) delete seenFirst[k];
   if (!u) return scr("login");
-  let ok = false;
-  try { ok = (await getDoc(doc(db,"admins",u.uid))).exists(); } catch {}
-  if (!ok) { $("#myUid").textContent = u.uid; return scr("noadmin"); }
-  $("#who").textContent = u.email || "";
+  let ad = null;
+  try { const a = await getDoc(doc(db,"admins",u.uid)); if (a.exists()) ad = a.data(); } catch {}
+  if (!ad) return scr("noadmin");
+  ROLE = ad.role === "staff" ? "staff" : "owner";
+  if (!allowedTabs().includes(tab)) tab = "orders";
+  $("#who").textContent = (ROLE==="staff" ? "موظف · " : "") + (u.email || "");
   scr("panel");
   const live = (q, key, sort=true) => unsubs.push(onSnapshot(q, s => {
     watchNew(key, s);
@@ -236,9 +240,12 @@ onAuthStateChanged(auth, async u => {
   live(collection(db,"products"), "products", false);
   live(collection(db,"banners"), "banners", false);
   unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
+  if (ROLE === "owner") unsubs.push(onSnapshot(collection(db,"admins"), s => { D.staff = s.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.role==="staff"); draw(); }, e => console.error("staff", e)));
   unsubs.push(onSnapshot(collection(db,"users"), s => { D.users = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw(); if (openUser) uOpen(openUser, true); }, e => console.error("users", e)));
 });
-let openUser = null;
+let openUser = null, ROLE = "owner";
+const STAFF_TABS = ["orders","topups","tickets"];
+const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : STAFF_TABS;
 async function loadUsers(){}
 
 /* ================= admin notifications ================= */
@@ -264,6 +271,16 @@ async function fcmRegister(){
   lsS("cp_admin_fcm", token);
   return "ok";
 }
+function iosHelp(){
+  openSheet(`<h3>إشعارات الآيفون<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <p style="margin-bottom:10px;line-height:1.9">في الآيفون، الإشعارات توصل بس لو لوحة التحكم مضافة للشاشة الرئيسية:</p>
+    <ol style="padding-inline-start:20px;line-height:2.1;margin-bottom:12px">
+      <li>افتح اللوحة من متصفح <b>Safari</b></li>
+      <li>اضغط زر المشاركة <b>⬆︎</b> تحت</li>
+      <li>اختار <b>«إضافة إلى الشاشة الرئيسية»</b></li>
+      <li>افتح اللوحة من الأيقونة الجديدة، وسجّل دخول، واضغط الجرس 🔔</li></ol>
+    <p class="m" style="color:var(--muted)">يحتاج iOS 16.4 أو أحدث.</p>`);
+}
 async function fcmUnregister(){
   const t = lsG("cp_admin_fcm"); if (!t) return;
   try { await deleteDoc(doc(db, "adminTokens", t)); } catch {}
@@ -279,6 +296,7 @@ $("#nBtn").onclick = async () => {
   let r = "err"; try { r = await fcmRegister(); } catch(e){ console.error(e); }
   if (r === "ok") notify("تم تفعيل الإشعارات ✓", "توصلك إشعارات الطلبات والشحن حتى والمتصفح مسكّر", "welcome");
   else if (r === "nokey") { notify("تم تفعيل الإشعارات ✓", "تشتغل طول ما اللوحة مفتوحة", "welcome"); toast("الإشعارات الخارجية مش مفعّلة بعد، تواصل مع الدعم الفني","e"); }
+  else if (/iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone) iosHelp();
   else toast("الإشعارات تشتغل واللوحة مفتوحة بس (الجهاز ما قبلش الإشعارات الخارجية)","e");
 };
 let actx;
@@ -309,11 +327,11 @@ let fcmRefreshed = false;
 function maybeRefreshFcm(){ if (fcmRefreshed || !notifOn() || !D.settings?.push?.vapid || !auth.currentUser) return; fcmRefreshed = true; fcmRegister().catch(e=>console.warn(e)); }
 
 /* ================= layout ================= */
-const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["settings","الإعدادات"]];
+const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["staff","الموظفين"],["settings","الإعدادات"]];
 function draw(){
   if ($("#panel").classList.contains("hidden")) return;
   const pend = { orders: D.orders.filter(o=>o.status==="pending").length, topups: D.topups.filter(t=>t.status==="pending").length, tickets: D.tickets.filter(t=>t.status==="open").length };
-  $("#tabs").innerHTML = TABS.map(([k,t]) => `<button class="${tab===k?"on":""}" data-t="${k}">${t}</button>`).join("");
+  $("#tabs").innerHTML = TABS.filter(t=>allowedTabs().includes(t[0])).map(([k,t]) => `<button class="${tab===k?"on":""}" data-t="${k}">${t}</button>`).join("");
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => { tab=b.dataset.t; draw(); window.scrollTo(0,0); });
   const keep = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (tab==="settings" && $("#main").dataset.t==="settings") return; // don't wipe the settings form while editing
@@ -391,6 +409,23 @@ users(){
       <div class="wrow">${walletChips(u)}</div>
     </div>`).join("") || `<div class="empty">لا يوجد مستخدمين</div>`}`;
 },
+staff(){
+  const q = (stq||"").trim().toLowerCase();
+  const found = q.length >= 3 ? D.users.filter(u => [u.email,u.short,u.phone,u.name].some(x=>String(x||"").toLowerCase().includes(q))).slice(0,6) : [];
+  return `<div class="box2" style="margin-bottom:14px">
+    <b class="h">الموظفين (${D.staff.length}/3)</b>
+    <p class="m" style="color:var(--muted);margin:4px 0 0">الموظف يقدر يدخل لوحة التحكم ويتعامل مع <b>الطلبات والشحن والتذاكر</b> بس. ما يقدرش يعدّل المنتجات ولا الإعدادات ولا أرصدة المستخدمين ولا الموظفين.</p></div>
+  ${D.staff.map(a => { const u = D.users.find(x=>x.id===a.id) || {};
+    return `<div class="card"><div class="top"><div class="t"><b class="h">${esc(a.name||u.name||"موظف")}</b><div class="m">${esc(a.email||u.email||"")} · <span class="num">${esc(u.short||"")}</span></div></div>
+      <button class="btn btn-x" onclick="staffDel('${a.id}')">إزالة</button></div></div>`; }).join("") || `<div class="empty" style="padding:14px">ما فيش موظفين</div>`}
+  ${D.staff.length < 3 ? `<div class="sec">إضافة موظف</div>
+    <p class="m" style="color:var(--muted);margin:-4px 2px 8px">الموظف لازم يكون عنده حساب في الموقع. ابحث بالبريد أو الـ ID أو الهاتف.</p>
+    <input class="inp" id="stq" placeholder="بريد الموظف أو ID حسابه" value="${esc(stq||"")}" dir="auto">
+    <div style="margin-top:10px">${found.map(u => { const isA = D.staff.some(a=>a.id===u.id) || u.id===auth.currentUser?.uid;
+      return `<div class="card"><div class="top"><div class="t"><b class="h">${esc(u.name)}</b><div class="m">${esc(u.email)} · <span class="num">${esc(u.short)}</span></div></div>
+        ${isA ? `<span class="badge b-proc">مضاف</span>` : `<button class="btn btn-p" onclick="staffAdd('${u.id}')">إضافة كموظف</button>`}</div></div>`; }).join("") || (q.length>=3 ? `<div class="empty" style="padding:10px">ما لقيناش حساب بهذي البيانات</div>` : "")}</div>`
+  : `<p class="m" style="color:var(--muted)">وصلت للحد الأقصى (3 موظفين). أزل موظف باش تضيف غيره.</p>`}`;
+},
 tickets(){
   const c = k => D.tickets.filter(t=>t.status===k).length;
   const list = D.tickets.filter(t => kfil==="all" || t.status===kfil);
@@ -404,7 +439,7 @@ tickets(){
 settings(){
   const s = D.settings || {};
   const pays = PAYS();
-  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["support","الدعم والأسئلة"]];
+  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["support","الدعم والأسئلة"],["keys","المفاتيح"]];
   return `<form id="sf">
   <div class="chips stabs">${ST.map(([k,t])=>`<button type="button" class="${stab===k?"on":""}" data-st="${k}">${t}</button>`).join("")}</div>
 
@@ -416,6 +451,12 @@ settings(){
   <div class="spane" data-pane="channels" ${stab==="channels"?"":"hidden"}>
     <p class="m" style="color:var(--muted);margin:0 2px 10px">القنوات اللي تظهر للزبائن في صفحة «قنواتي».</p>
     ${rows("chs", CH_F, s.channels||[], r => `${esc(r.title||"قناة جديدة")}<small>${esc(r.handle||"")}</small>`)}
+  </div>
+
+  <div class="spane" data-pane="keys" ${stab==="keys"?"":"hidden"}>
+    <p class="m" style="color:var(--muted);margin:0 2px 10px">مفاتيح ربط الإشعارات. لا تغيّرها إلا لو طلب منك الدعم الفني.</p>
+    <div class="box2"><div class="fld"><label>مفتاح 1</label><input class="inp" id="sPushW" dir="ltr" value="${esc(s.push?.worker||"")}" autocomplete="off"></div>
+    <div class="fld" style="margin:0"><label>مفتاح 2</label><input class="inp" id="sPushV" dir="ltr" value="${esc(s.push?.vapid||"")}" autocomplete="off"></div></div>
   </div>
 
   <div class="spane" data-pane="support" ${stab==="support"?"":"hidden"}>
@@ -468,6 +509,7 @@ function readRows(id){
 /* ================= actions ================= */
 const A = {
   users(){ const i=$("#uq"); i.oninput = () => { uq=i.value; draw(); }; },
+  staff(){ const i=$("#stq"); if (i) i.oninput = () => { stq=i.value; draw(); }; },
   settings(){
     document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { stab = b.dataset.st;
       document.querySelectorAll("[data-st]").forEach(x => x.classList.toggle("on", x===b));
@@ -477,7 +519,7 @@ const A = {
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
     await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
-      push: D.settings?.push || {}, updatedAt:serverTimestamp() });
+      push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 
@@ -546,11 +588,11 @@ window.uOpen = (id, refresh) => {
     <div id="uBal">${uBalHTML(u)}</div>
     <div class="kv"><span>عدد الطلبات:</span><b>${oc.length}</b></div>
     <div class="kv"><span>UID:</span><b class="num" style="font-size:11px">${esc(u.id)}</b>${cpb(u.id)}</div>
-    <div class="sec">تعديل الرصيد يدوياً</div>
+    ${ROLE!=="owner" ? "" : `<div class="sec">تعديل الرصيد يدوياً</div>
     <div class="fld"><label>المحفظة</label><select class="inp" id="uw">${PAYS().map(p=>`<option value="${esc(p.key)}">${esc(p.name)} (${esc(p.cur||"د.ل")})</option>`).join("")}</select></div>
     <div class="g2"><div class="fld"><label>المبلغ</label><input class="inp num" id="ua" type="number" step="0.01" placeholder="مثال: 10"></div>
     <div class="fld"><label>ملاحظة</label><input class="inp" id="un" placeholder="مثال: تعويض"></div></div>
-    <div class="g2"><button class="btn btn-ok w" id="uAdd">إضافة +</button><button class="btn btn-x w" id="uSub">خصم −</button></div>`);
+    <div class="g2"><button class="btn btn-ok w" id="uAdd">إضافة +</button><button class="btn btn-x w" id="uSub">خصم −</button></div>`}`);
   const adj = sign => busy(null, async () => {
     const v = toCents($("#ua").value); if (!(v>0)) throw new Error("اكتب مبلغ صحيح");
     const amount = sign*v, w = $("#uw").value;
@@ -562,9 +604,17 @@ window.uOpen = (id, refresh) => {
     });
     closeSheet(); toast("تم تعديل الرصيد ✓","s"); loadUsers();
   });
-  $("#uAdd").onclick = () => adj(1); $("#uSub").onclick = () => adj(-1);
+  if ($("#uAdd")) { $("#uAdd").onclick = () => adj(1); $("#uSub").onclick = () => adj(-1); }
 };
 
+window.staffAdd = id => busy(null, async () => {
+  if (D.staff.length >= 3) throw new Error("الحد الأقصى 3 موظفين");
+  const u = D.users.find(x=>x.id===id); if (!u) return;
+  if (!confirm(`إضافة ${u.name} كموظف؟`)) return;
+  await setDoc(doc(db,"admins",id), { role:"staff", name:u.name||"", email:u.email||"", addedAt:serverTimestamp() });
+  stq = ""; toast("تمت إضافة الموظف ✓","s");
+});
+window.staffDel = id => { if (confirm("إزالة صلاحية هذا الموظف؟")) busy(null, async () => { await deleteDoc(doc(db,"admins",id)); toast("تمت الإزالة","s"); }); };
 window.kReply = id => {
   const t = D.tickets.find(x=>x.id===id);
   openSheet(`<h3>الرد على التذكرة<button class="btn btn-o" onclick="closeSheet()">✕</button></h3><p style="color:var(--muted);margin-bottom:10px;white-space:pre-line">${esc(t.message)}</p>

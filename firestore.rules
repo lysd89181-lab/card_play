@@ -4,6 +4,7 @@ service cloud.firestore {
 
     function signed() { return request.auth != null; }
     function isAdmin() { return signed() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
+    function isOwner() { return isAdmin() && get(/databases/$(db)/documents/admins/$(request.auth.uid)).data.get('role', 'owner') != 'staff'; }
     function me(uid) { return signed() && request.auth.uid == uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function userPath(uid) { return /databases/$(db)/documents/users/$(uid); }
@@ -29,13 +30,17 @@ service cloud.firestore {
 
     match /admins/{uid} {
       allow read: if me(uid) || isAdmin();
-      allow write: if false;
+      // owner adds/removes staff (max 3 is enforced in the panel); owner record itself can't be changed from the site
+      allow create, update: if isOwner() && uid != request.auth.uid
+        && request.resource.data.role == 'staff'
+        && request.resource.data.keys().hasOnly(['role','name','email','addedAt']);
+      allow delete: if isOwner() && uid != request.auth.uid && resource.data.get('role', 'owner') == 'staff';
     }
 
     match /adminTokens/{id} { allow read, write: if isAdmin(); }
-    match /settings/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /banners/{id}  { allow read: if true; allow write: if isAdmin(); }
-    match /products/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /settings/{id} { allow read: if true; allow write: if isOwner(); }
+    match /banners/{id}  { allow read: if true; allow write: if isOwner(); }
+    match /products/{id} { allow read: if true; allow write: if isOwner(); }
 
     match /users/{uid} {
       allow read: if me(uid) || isAdmin();

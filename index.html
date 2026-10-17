@@ -38,7 +38,7 @@ a{color:inherit;text-decoration:none}
 svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 svg.f{fill:currentColor;stroke:none}
 .num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
-.hidden{display:none!important}
+.hidden,[hidden]{display:none!important}
 .wrap{max-width:480px;margin:0 auto;min-height:100vh;position:relative}
 
 /* ---------- loader ---------- */
@@ -120,7 +120,8 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .dots i{width:6px;height:6px;border-radius:6px;background:rgba(255,255,255,.45);transition:.3s}
 .dots i.on{width:18px;background:var(--blue)}
 
-.cats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0 18px}
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 18px}
+@media (max-width:899px){ .cat{font-size:13px;padding:12px 4px} }
 .cat{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 6px;border-radius:16px;background:var(--card);border:1px solid var(--line);font-weight:700;font-size:14px;transition:.2s}
 .cat svg{width:28px;height:28px;color:var(--blue2);filter:drop-shadow(0 0 8px rgba(30,123,255,.6))}
 .cat.on{border-color:var(--blue);background:linear-gradient(160deg,rgba(30,123,255,.28),rgba(16,30,58,.6));box-shadow:var(--glow)}
@@ -292,6 +293,19 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .wc .def svg{width:14px;height:14px}
 .wc .mk-def{font-size:12px;font-weight:800;padding:4px 11px;border-radius:9px;border:1px solid rgba(255,255,255,.4)}
 .wc .top-up{font-size:12.5px;font-weight:800;padding:5px 12px;border-radius:10px;background:#fff;color:#0b1f4a;position:relative;z-index:1}
+.step{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14.5px;margin:4px 2px 10px}
+.step span{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;background:linear-gradient(135deg,#2C8BFF,var(--blue3));box-shadow:var(--glow)}
+.paylist{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.payrow{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:15px;border:1px solid var(--line);background:rgba(10,22,46,.7);text-align:right;width:100%}
+.payrow .pi{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:900;flex-shrink:0}
+.payrow .pi svg{width:20px;height:20px}
+.payrow .pt{flex:1;min-width:0}
+.payrow .pt b{display:block;font-size:14.5px;font-weight:800}
+.payrow .pt small{font-size:12px;color:var(--muted);font-weight:600}
+.payrow .pt em{font-style:normal;color:var(--warn)}
+.payrow .pp{font-weight:900;font-size:15px;color:var(--blue2);white-space:nowrap}
+.payrow.on{border-color:var(--blue);background:linear-gradient(160deg,rgba(30,123,255,.28),rgba(10,22,46,.7));box-shadow:var(--glow)}
+.payrow.low:not(.on){opacity:.7}
 .wsel{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-bottom:14px;padding-bottom:2px}
 .wsel::-webkit-scrollbar{display:none}
 .wsel button{flex-shrink:0;padding:8px 12px;border-radius:13px;border:1px solid var(--line);background:rgba(10,22,46,.7);text-align:right;min-width:112px}
@@ -405,6 +419,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M7 15h4"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.6 1.5A3.8 3.8 0 0 1 17.5 18z"/><path d="M12 11v5M9.8 13.2L12 11l2.2 2.2"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-apps" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><path d="M10.5 18.5h3"/><rect x="9" y="6.5" width="2.4" height="2.4" rx=".6"/><rect x="12.6" y="6.5" width="2.4" height="2.4" rx=".6"/><rect x="9" y="10.1" width="2.4" height="2.4" rx=".6"/><rect x="12.6" y="10.1" width="2.4" height="2.4" rx=".6"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
@@ -471,7 +486,8 @@ const CATS = [
   { key:"all",   name:"الكل",     icon:"grid" },
   { key:"games", name:"ألعاب",    icon:"game" },
   { key:"cards", name:"بطاقات",   icon:"card" },
-  { key:"subs",  name:"اشتراكات", icon:"star" }
+  { key:"subs",  name:"اشتراكات", icon:"star" },
+  { key:"apps",  name:"تطبيقات",  icon:"apps" }
 ];
 const STATUS = {
   pending:   { t:"قيد التنفيذ", c:"b-pend" },
@@ -569,7 +585,7 @@ const AUTH_ERR = {
   "auth/popup-closed-by-user":"تم إغلاق نافذة Google",
   "auth/requires-recent-login":"لأمان حسابك، سجّل خروج ثم ادخل من جديد وأعد المحاولة"
 };
-const aerr = e => AUTH_ERR[e?.code] || "حدث خطأ، حاول مرة أخرى";
+const aerr = e => AUTH_ERR[e?.code] || "حدث خطأ في قاعدة البيانات، حاول مرة أخرى";
 
 $("#authForm").onsubmit = async e => {
   e.preventDefault();
@@ -625,7 +641,7 @@ onAuthStateChanged(auth, async u => {
   S.unsubs.forEach(f => f()); S.unsubs = [];
   S.user = u; S.me = null; S.orders = []; S.topups = []; S.tickets = [];
   if (!u) { show("auth"); busy($("#aBtn"), false, mode==="reg"?"إنشاء حساب":"تسجيل الدخول"); return; }
-  try { await ensureUserDoc(u); } catch (e) { console.error(e); toast("تعذر تجهيز الحساب، حاول مرة أخرى","e"); }
+  try { await ensureUserDoc(u); } catch (e) { console.error(e); toast("حدث خطأ في قاعدة البيانات، حاول مرة أخرى","e"); }
   const mine = c => query(collection(db, c), where("uid","==",u.uid));
   S.unsubs.push(
     onSnapshot(doc(db,"users",u.uid), s => { S.me = s.exists() ? { id:s.id, ...s.data() } : null; render(); }),
@@ -873,34 +889,45 @@ $("#sheet").addEventListener("touchend",e=>{ if(sy!==null && e.changedTouches[0]
 let selOpt = 0;
 window.openProduct = id => {
   const p = S.products.find(x=>x.id===id); if (!p) return;
-  let wk = defW();
-  const opts = p.options || [];
-  const firstOk = () => Math.max(0, opts.findIndex(o => priceFor(o,wk) > 0));
-  selOpt = firstOk();
+  const opts = (p.options || []).map((o,i)=>({ ...o, i })).filter(o => pays().some(w => priceFor(o, w.key) > 0));
+  let sel = -1, wk = null;
+  const fromLabel = o => { const ps = pays().map(w=>({ w, v:priceFor(o,w.key) })).filter(x=>x.v>0);
+    const lyd = ps.filter(x=>curOf(x.w.key)!=="$"), list = lyd.length ? lyd : ps;
+    const m = list.reduce((a,b)=> b.v<a.v?b:a, list[0]); return m ? `من ${money(m.v, curOf(m.w.key))}` : ""; };
   openSheet(`
     <div class="ph"><div class="oimg">${pimg(p)}</div><div><h3>${esc(p.name)}</h3>${p.description?`<p>${esc(p.description)}</p>`:""}</div></div>
-    <div class="fld"><label>الدفع من محفظة</label></div><div class="wsel" id="pW"></div>
-    ${opts.length ? `<div class="fld"><label>اختر الباقة</label></div><div class="opts" id="pOpts"></div>` : `<div class="empty">لا توجد باقات متاحة</div>`}
-    ${p.needsInput ? `<div class="fld"><label>${esc(p.inputLabel||"ID اللاعب")}</label><input class="inp" id="pIn" placeholder="${esc(p.inputHint||"اكتب هنا")}" dir="auto" maxlength="200"></div>` : ""}
-    <div class="sum"><span id="pBal"></span><span>الإجمالي: <b id="pTot">—</b></span></div>
-    <button class="btn btn-p" id="buyBtn"></button>`);
+    ${opts.length ? `<div class="step"><span>1</span>اختر الباقة</div><div class="opts" id="pOpts"></div>` : `<div class="empty">لا توجد باقات متاحة حالياً</div>`}
+    <div id="pPay"></div>
+    ${p.needsInput ? `<div class="fld" id="pInBox" hidden><label>${esc(p.inputLabel||"ID اللاعب")}</label><input class="inp" id="pIn" placeholder="${esc(p.inputHint||"اكتب هنا")}" dir="auto" maxlength="200"></div>` : ""}
+    <div class="sum" id="pSum" hidden><span id="pBal"></span><span>الإجمالي: <b id="pTot">—</b></span></div>
+    <button class="btn btn-p" id="buyBtn" disabled>اختر الباقة</button>`);
   const upd = () => {
-    const cur = curOf(wk);
-    $("#pW").innerHTML = pays().map(w => `<button class="${w.key===wk?"on":""}" data-w="${esc(w.key)}"><b>${esc(w.name)}</b><small>${money(wbal(w.key), curOf(w.key))}</small></button>`).join("");
-    document.querySelectorAll("#pW [data-w]").forEach(b => b.onclick = () => { wk = b.dataset.w; if (priceFor(opts[selOpt],wk)<=0) selOpt = firstOk(); upd(); setDefW(wk, true); });
-    $("#pBal").innerHTML = `رصيد ${esc(W(wk).name)}: ${money(wbal(wk), cur)}`;
+    if (!opts.length) return;
+    $("#pOpts").innerHTML = opts.map(o => `<button class="opt ${o.i===sel?"on":""}" data-i="${o.i}"><b>${iso(esc(o.label))}</b><small>${fromLabel(o)}</small></button>`).join("");
+    document.querySelectorAll("#pOpts .opt").forEach(b => b.onclick = () => { sel = +b.dataset.i;
+      const o = p.options[sel];
+      if (!wk || priceFor(o,wk) <= 0) { const ws = pays().filter(w=>priceFor(o,w.key)>0);
+        wk = (ws.find(w => w.key===defW() && wbal(w.key) >= priceFor(o,w.key)) || ws.find(w => wbal(w.key) >= priceFor(o,w.key)) || ws.find(w=>w.key===defW()) || ws[0])?.key || null; }
+      upd(); setTimeout(()=>$("#pPay")?.scrollIntoView({ behavior:"smooth", block:"nearest" }), 60); });
     const btn = $("#buyBtn");
-    if (!opts.length) { btn.disabled = true; btn.textContent = "غير متاح"; return; }
-    $("#pOpts").innerHTML = opts.map((o,i)=>{ const pr = priceFor(o,wk);
-      return `<button class="opt ${i===selOpt&&pr>0?"on":""}" data-i="${i}" ${pr>0?"":'disabled style="opacity:.4"'}><b>${iso(esc(o.label))}</b><small>${pr>0?money(pr, cur):"غير متوفر"}</small></button>`; }).join("");
-    document.querySelectorAll("#pOpts .opt:not([disabled])").forEach(b => b.onclick = () => { selOpt=+b.dataset.i; upd(); });
-    const price = priceFor(opts[selOpt], wk);
-    if (!(price > 0)) { $("#pTot").textContent = "—"; btn.disabled = true; btn.textContent = `غير متوفر بمحفظة ${W(wk).name}`; return; }
-    btn.disabled = false;
+    if (sel < 0) { $("#pPay").innerHTML = ""; btn.disabled = true; btn.textContent = "اختر الباقة"; return; }
+    const o = p.options[sel];
+    const ws = pays().filter(w => priceFor(o, w.key) > 0);
+    $("#pPay").innerHTML = `<div class="step"><span>2</span>اختر طريقة الدفع</div><div class="paylist">${ws.map(w => { const pr = priceFor(o,w.key), ok = wbal(w.key) >= pr;
+      return `<button class="payrow ${w.key===wk?"on":""} ${ok?"":"low"}" data-w="${esc(w.key)}">
+        <span class="pi" style="background:${pst(w.key).bg}">${wIcon(w.key)}</span>
+        <span class="pt"><b>${esc(w.name)}</b><small>رصيدك: ${money(wbal(w.key), curOf(w.key))}${ok?"":` · <em>غير كافي</em>`}</small></span>
+        <span class="pp">${money(pr, curOf(w.key))}</span></button>`; }).join("")}</div>`;
+    document.querySelectorAll("#pPay [data-w]").forEach(b => b.onclick = () => { wk = b.dataset.w; upd(); });
+    if ($("#pInBox")) $("#pInBox").hidden = false;
+    const price = priceFor(o, wk), cur = curOf(wk);
+    $("#pSum").hidden = false;
+    $("#pBal").innerHTML = `رصيد ${esc(W(wk).name)}: ${money(wbal(wk), cur)}`;
     $("#pTot").innerHTML = money(price, cur);
     const ok = wbal(wk) >= price;
-    btn.innerHTML = ok ? `${ic("cart")} تأكيد الشراء` : `${ic("plus")} رصيد ${esc(W(wk).name)} غير كافي — اشحن الآن`;
-    btn.onclick = ok ? () => buy(p, selOpt, wk) : () => { closeSheet(); setTimeout(()=>openTopup(wk),350); };
+    btn.disabled = false;
+    btn.innerHTML = ok ? `${ic("cart")} تأكيد الشراء` : `${ic("plus")} اشحن محفظة ${esc(W(wk).name)}`;
+    btn.onclick = ok ? () => buy(p, sel, wk) : () => { closeSheet(); setTimeout(()=>openTopup(wk),350); };
   };
   upd();
 };

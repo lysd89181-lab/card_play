@@ -1,0 +1,15 @@
+{
+  "name": "لوحة التحكم",
+  "short_name": "لوحة التحكم",
+  "start_url": "admin.html",
+  "scope": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#050A16",
+  "theme_color": "#050A16",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/logo-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
