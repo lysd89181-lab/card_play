@@ -5,6 +5,7 @@ service cloud.firestore {
     function signed() { return request.auth != null; }
     function isAdmin() { return signed() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
     function isOwner() { return isAdmin() && get(/databases/$(db)/documents/admins/$(request.auth.uid)).data.get('role', 'owner') != 'staff'; }
+    function can(p) { return isOwner() || (isAdmin() && p in get(/databases/$(db)/documents/admins/$(request.auth.uid)).data.get('perms', ['orders','topups','tickets'])); }
     function me(uid) { return signed() && request.auth.uid == uid; }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function userPath(uid) { return /databases/$(db)/documents/users/$(uid); }
@@ -33,14 +34,15 @@ service cloud.firestore {
       // owner adds/removes staff (max 3 is enforced in the panel); owner record itself can't be changed from the site
       allow create, update: if isOwner() && uid != request.auth.uid
         && request.resource.data.role == 'staff'
-        && request.resource.data.keys().hasOnly(['role','name','email','addedAt']);
+        && request.resource.data.keys().hasOnly(['role','name','email','perms','addedAt'])
+        && request.resource.data.get('perms', []) is list;
       allow delete: if isOwner() && uid != request.auth.uid && resource.data.get('role', 'owner') == 'staff';
     }
 
     match /adminTokens/{id} { allow read, write: if isAdmin(); }
-    match /settings/{id} { allow read: if true; allow write: if isOwner(); }
-    match /banners/{id}  { allow read: if true; allow write: if isOwner(); }
-    match /products/{id} { allow read: if true; allow write: if isOwner(); }
+    match /settings/{id} { allow read: if true; allow write: if can('settings'); }
+    match /banners/{id}  { allow read: if true; allow write: if can('banners'); }
+    match /products/{id} { allow read: if true; allow write: if can('products'); }
 
     match /users/{uid} {
       allow read: if me(uid) || isAdmin();
@@ -48,7 +50,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['name','email','phone','photo','short','wallets','defWallet','createdAt'])
         && request.resource.data.wallets is map && request.resource.data.wallets.size() == 0
         && request.resource.data.name is string && request.resource.data.name.size() <= 60;
-      allow update: if isAdmin() || (me(uid) && (
+      allow update: if can('topups') || can('orders') || can('balance') || (me(uid) && (
           // profile edit
           (changed().hasOnly(['name','phone'])
             && request.resource.data.name is string && request.resource.data.name.size() <= 60
@@ -81,12 +83,12 @@ service cloud.firestore {
         && request.resource.data.price == optPrice(request.resource.data.productId, request.resource.data.optionIndex, request.resource.data.wallet)
         && getAfter(userPath(request.auth.uid)).data.lastOrder == oid
         && getAfter(userPath(request.auth.uid)).data.wallets[request.resource.data.wallet] == get(userPath(request.auth.uid)).data.wallets.get(request.resource.data.wallet, 0) - request.resource.data.price;
-      allow update, delete: if isAdmin();
+      allow update, delete: if can('orders');
     }
 
     match /topups/{id} {
       allow read: if (signed() && resource.data.uid == request.auth.uid) || isAdmin();
-      allow create: if isAdmin() || (signed()
+      allow create: if can('balance') || (signed()
         && request.resource.data.keys().hasOnly(['uid','uName','uShort','method','methodName','wallet','cur','amount','fields','shot','note','status','createdAt','updatedAt'])
         && request.resource.data.fields is map && request.resource.data.fields.size() <= 12
         && request.resource.data.shot is string && request.resource.data.shot.size() <= 900000
@@ -97,7 +99,7 @@ service cloud.firestore {
         && request.resource.data.wallet is string && request.resource.data.wallet.size() <= 20
         && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
         && request.resource.data.note is string && request.resource.data.note.size() <= 300);
-      allow update, delete: if isAdmin();
+      allow update, delete: if can('topups');
     }
 
     match /tickets/{id} {
@@ -108,7 +110,7 @@ service cloud.firestore {
         && request.resource.data.status == 'open'
         && request.resource.data.reply == ''
         && request.resource.data.message is string && request.resource.data.message.size() <= 1500;
-      allow update, delete: if isAdmin();
+      allow update, delete: if can('tickets');
     }
 
     // everything else (old project data) is closed

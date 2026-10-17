@@ -61,6 +61,7 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .rows-box{border:none;padding:0}
 .box2{border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(10,22,46,.5)}
 .savebar{position:sticky;bottom:0;padding:10px 0 calc(6px + var(--safe-b));background:linear-gradient(transparent,rgba(5,10,22,.95) 30%);z-index:3}
+.perms{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
 .wrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wchip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:9px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .wchip.on{color:#4ADE80;border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.1)}
@@ -226,7 +227,7 @@ onAuthStateChanged(auth, async u => {
   let ad = null;
   try { const a = await getDoc(doc(db,"admins",u.uid)); if (a.exists()) ad = a.data(); } catch {}
   if (!ad) return scr("noadmin");
-  ROLE = ad.role === "staff" ? "staff" : "owner";
+  ROLE = ad.role === "staff" ? "staff" : "owner"; PERMS = Array.isArray(ad.perms) ? ad.perms : DEF_PERMS;
   if (!allowedTabs().includes(tab)) tab = "orders";
   $("#who").textContent = (ROLE==="staff" ? "موظف · " : "") + (u.email || "");
   scr("panel");
@@ -240,12 +241,19 @@ onAuthStateChanged(auth, async u => {
   live(collection(db,"products"), "products", false);
   live(collection(db,"banners"), "banners", false);
   unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
+  if (ROLE === "staff") unsubs.push(onSnapshot(doc(db,"admins",u.uid), s => {
+    if (!s.exists()) { unsubs.forEach(f=>f()); unsubs=[]; return scr("noadmin"); }
+    PERMS = Array.isArray(s.data().perms) ? s.data().perms : DEF_PERMS;
+    if (!allowedTabs().includes(tab)) tab = allowedTabs()[0] || "orders";
+    $("#main").dataset.t = ""; draw(); }));
   if (ROLE === "owner") unsubs.push(onSnapshot(collection(db,"admins"), s => { D.staff = s.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.role==="staff"); draw(); }, e => console.error("staff", e)));
   unsubs.push(onSnapshot(collection(db,"users"), s => { D.users = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw(); if (openUser) uOpen(openUser, true); }, e => console.error("users", e)));
 });
-let openUser = null, ROLE = "owner";
-const STAFF_TABS = ["orders","topups","tickets"];
-const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : STAFF_TABS;
+let openUser = null, ROLE = "owner", PERMS = [];
+const PERM_LIST = [["orders","الطلبات"],["topups","طلبات الشحن"],["tickets","التذاكر"],["products","المنتجات"],["banners","البانرات"],["users","عرض المستخدمين"],["balance","تعديل الأرصدة يدوياً"],["settings","الإعدادات"]];
+const DEF_PERMS = ["orders","topups","tickets"];
+const can = p => ROLE === "owner" || PERMS.includes(p);
+const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : TABS.map(t=>t[0]).filter(k => k !== "staff" && PERMS.includes(k));
 async function loadUsers(){}
 
 /* ================= admin notifications ================= */
@@ -414,10 +422,13 @@ staff(){
   const found = q.length >= 3 ? D.users.filter(u => [u.email,u.short,u.phone,u.name].some(x=>String(x||"").toLowerCase().includes(q))).slice(0,6) : [];
   return `<div class="box2" style="margin-bottom:14px">
     <b class="h">الموظفين (${D.staff.length}/3)</b>
-    <p class="m" style="color:var(--muted);margin:4px 0 0">الموظف يقدر يدخل لوحة التحكم ويتعامل مع <b>الطلبات والشحن والتذاكر</b> بس. ما يقدرش يعدّل المنتجات ولا الإعدادات ولا أرصدة المستخدمين ولا الموظفين.</p></div>
+    <p class="m" style="color:var(--muted);margin:4px 0 0">حدد لكل موظف شن يقدر يشوف ويعدّل. التغيير يتطبق عليه مباشرة. إدارة الموظفين للمدير بس.</p></div>
   ${D.staff.map(a => { const u = D.users.find(x=>x.id===a.id) || {};
+    const pr = Array.isArray(a.perms) ? a.perms : DEF_PERMS;
     return `<div class="card"><div class="top"><div class="t"><b class="h">${esc(a.name||u.name||"موظف")}</b><div class="m">${esc(a.email||u.email||"")} · <span class="num">${esc(u.short||"")}</span></div></div>
-      <button class="btn btn-x" onclick="staffDel('${a.id}')">إزالة</button></div></div>`; }).join("") || `<div class="empty" style="padding:14px">ما فيش موظفين</div>`}
+      <button class="btn btn-x" onclick="staffDel('${a.id}')">إزالة</button></div>
+      <div class="sec" style="font-size:13.5px;margin:12px 2px 6px">الصلاحيات</div>
+      <div class="perms">${PERM_LIST.map(([k,t]) => `<label class="sw" style="margin:0"><input type="checkbox" ${pr.includes(k)?"checked":""} onchange="staffPerm('${a.id}','${k}',this.checked)"> ${t}</label>`).join("")}</div></div>`; }).join("") || `<div class="empty" style="padding:14px">ما فيش موظفين</div>`}
   ${D.staff.length < 3 ? `<div class="sec">إضافة موظف</div>
     <p class="m" style="color:var(--muted);margin:-4px 2px 8px">الموظف لازم يكون عنده حساب في الموقع. ابحث بالبريد أو الـ ID أو الهاتف.</p>
     <input class="inp" id="stq" placeholder="بريد الموظف أو ID حسابه" value="${esc(stq||"")}" dir="auto">
@@ -588,7 +599,7 @@ window.uOpen = (id, refresh) => {
     <div id="uBal">${uBalHTML(u)}</div>
     <div class="kv"><span>عدد الطلبات:</span><b>${oc.length}</b></div>
     <div class="kv"><span>UID:</span><b class="num" style="font-size:11px">${esc(u.id)}</b>${cpb(u.id)}</div>
-    ${ROLE!=="owner" ? "" : `<div class="sec">تعديل الرصيد يدوياً</div>
+    ${!can("balance") ? "" : `<div class="sec">تعديل الرصيد يدوياً</div>
     <div class="fld"><label>المحفظة</label><select class="inp" id="uw">${PAYS().map(p=>`<option value="${esc(p.key)}">${esc(p.name)} (${esc(p.cur||"د.ل")})</option>`).join("")}</select></div>
     <div class="g2"><div class="fld"><label>المبلغ</label><input class="inp num" id="ua" type="number" step="0.01" placeholder="مثال: 10"></div>
     <div class="fld"><label>ملاحظة</label><input class="inp" id="un" placeholder="مثال: تعويض"></div></div>
@@ -611,8 +622,14 @@ window.staffAdd = id => busy(null, async () => {
   if (D.staff.length >= 3) throw new Error("الحد الأقصى 3 موظفين");
   const u = D.users.find(x=>x.id===id); if (!u) return;
   if (!confirm(`إضافة ${u.name} كموظف؟`)) return;
-  await setDoc(doc(db,"admins",id), { role:"staff", name:u.name||"", email:u.email||"", addedAt:serverTimestamp() });
+  await setDoc(doc(db,"admins",id), { role:"staff", name:u.name||"", email:u.email||"", perms:DEF_PERMS, addedAt:serverTimestamp() });
   stq = ""; toast("تمت إضافة الموظف ✓","s");
+});
+window.staffPerm = (id, k, on) => busy(null, async () => {
+  const a = D.staff.find(x=>x.id===id); if (!a) return;
+  const cur = new Set(Array.isArray(a.perms) ? a.perms : DEF_PERMS);
+  on ? cur.add(k) : cur.delete(k);
+  await updateDoc(doc(db,"admins",id), { perms:[...cur] }); toast("تم تحديث الصلاحيات ✓","s");
 });
 window.staffDel = id => { if (confirm("إزالة صلاحية هذا الموظف؟")) busy(null, async () => { await deleteDoc(doc(db,"admins",id)); toast("تمت الإزالة","s"); }); };
 window.kReply = id => {
