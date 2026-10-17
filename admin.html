@@ -135,6 +135,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, GoogleAuthProv
 import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, orderBy, limit, onSnapshot,
   runTransaction, serverTimestamp, increment, writeBatch }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getMessaging, getToken, deleteToken, isSupported as fcmSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
 const fb = initializeApp({
   apiKey: "AIzaSyARNJOPAycWU3YJdZSBN1d9uoLrvso3i4Y",
@@ -218,7 +219,7 @@ onAuthStateChanged(auth, async u => {
   live(query(collection(db,"tickets"), orderBy("createdAt","desc"), limit(300)), "tickets");
   live(collection(db,"products"), "products", false);
   live(collection(db,"banners"), "banners", false);
-  unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); }));
+  unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
   unsubs.push(onSnapshot(collection(db,"users"), s => { D.users = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw(); if (openUser) uOpen(openUser, true); }, e => console.error("users", e)));
 });
 let openUser = null;
@@ -236,13 +237,33 @@ async function getSW(){
   try { swReg = await navigator.serviceWorker.register("sw.js", { scope:"./admin" }); await navigator.serviceWorker.ready; } catch(e){ console.warn(e); }
   return swReg;
 }
+async function fcmRegister(){
+  const vapid = D.settings?.push?.vapid;
+  if (!vapid) return "nokey";
+  if (!(await fcmSupported().catch(()=>false))) return "unsupported";
+  const reg = await getSW(); if (!reg) return "nosw";
+  const token = await getToken(getMessaging(fb), { vapidKey: vapid, serviceWorkerRegistration: reg });
+  if (!token) return "notoken";
+  await setDoc(doc(db, "adminTokens", token), { token, uid: auth.currentUser?.uid || "", ua: navigator.userAgent.slice(0,150), createdAt: serverTimestamp() });
+  lsS("cp_admin_fcm", token);
+  return "ok";
+}
+async function fcmUnregister(){
+  const t = lsG("cp_admin_fcm"); if (!t) return;
+  try { await deleteDoc(doc(db, "adminTokens", t)); } catch {}
+  try { await deleteToken(getMessaging(fb)); } catch {}
+  lsS("cp_admin_fcm", "");
+}
 $("#nBtn").onclick = async () => {
   if (!("Notification" in window)) return toast("المتصفح هذا ما يدعمش الإشعارات","e");
-  if (notifOn()) { lsS("cp_admin_notif","0"); nBtnUI(); return toast("تم إيقاف الإشعارات","s"); }
+  if (notifOn()) { lsS("cp_admin_notif","0"); await fcmUnregister(); nBtnUI(); return toast("تم إيقاف الإشعارات","s"); }
   const p = await Notification.requestPermission();
   if (p !== "granted") return toast("لازم تسمح بالإشعارات من إعدادات المتصفح","e");
   lsS("cp_admin_notif","1"); await getSW(); nBtnUI(); beep();
-  notify("تم تفعيل الإشعارات ✓", "توصلك إشعارات الطلبات وطلبات الشحن الجديدة");
+  let r = "err"; try { r = await fcmRegister(); } catch(e){ console.error(e); }
+  if (r === "ok") notify("تم تفعيل الإشعارات ✓", "توصلك إشعارات الطلبات والشحن حتى والمتصفح مسكّر", "welcome");
+  else if (r === "nokey") { notify("تم تفعيل الإشعارات ✓", "تشتغل طول ما اللوحة مفتوحة", "welcome"); toast("للإشعارات والمتصفح مسكّر: حط رابط الـ Worker ومفتاح VAPID في الإعدادات","e"); }
+  else toast("الإشعارات تشتغل واللوحة مفتوحة بس (الجهاز ما قبلش الإشعارات الخارجية)","e");
 };
 let actx;
 function beep(){ try { actx = actx || new (window.AudioContext||window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain();
@@ -268,6 +289,8 @@ function watchNew(key, snap){
 }
 nBtnUI();
 if (notifOn()) getSW();
+let fcmRefreshed = false;
+function maybeRefreshFcm(){ if (fcmRefreshed || !notifOn() || !D.settings?.push?.vapid || !auth.currentUser) return; fcmRefreshed = true; fcmRegister().catch(e=>console.warn(e)); }
 
 /* ================= layout ================= */
 const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["settings","الإعدادات"]];
@@ -371,6 +394,9 @@ settings(){
   ${rows("pays", PAY_F, pays)}
   <div class="sec">قنواتي</div>
   ${rows("chs", CH_F, s.channels||[])}
+  <div class="sec">إشعارات الأدمن (حتى والمتصفح مسكّر)</div>
+  <div class="fld"><label>رابط الـ Worker</label><input class="inp" id="sPushW" dir="ltr" value="${esc(s.push?.worker||"")}" placeholder="https://cardplay-notify.xxxx.workers.dev"></div>
+  <div class="fld"><label>مفتاح Web Push (VAPID key)</label><input class="inp" id="sPushV" dir="ltr" value="${esc(s.push?.vapid||"")}" placeholder="BExxxx..."></div>
   <div class="sec">أرقام الدعم</div>
   <div class="g2"><div class="fld"><label>واتساب (بالمفتاح الدولي)</label><input class="inp num" id="sWa" value="${esc(s.support?.whatsapp||"")}" placeholder="218912345678"></div>
   <div class="fld"><label>يوزر تيليجرام</label><input class="inp num" id="sTg" value="${esc(s.support?.telegram||"")}" placeholder="cardplay"></div></div>
@@ -418,7 +444,8 @@ const A = {
     const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل" }));
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
-    await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") }, updatedAt:serverTimestamp() });
+    await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
+      push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 

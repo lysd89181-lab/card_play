@@ -923,6 +923,7 @@ async function buy(p, i, wk){
         status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
       tx.update(uref, { ["wallets."+wk]: bal - price, lastOrder: oref.id });
     });
+    pingAdmin("orders", oref.id);
     closeSheet(); toast("تم استلام طلبك ✓ سيتم تنفيذه قريباً","s"); S.otab="all"; location.hash="#orders";
   } catch (e) { console.error(e); toast(e.message?.length<60 && !/permission|FirebaseError/i.test(e.message) ? e.message : "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
 }
@@ -986,12 +987,19 @@ window.openTopup = key => {
     if (si && !shot) return toast("ارفع صورة الإيصال","e");
     const btn = $("#tpBtn"); busy(btn,true);
     try {
-      await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
+      const tref = await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
         wallet:cur.key, cur:cc, amount, fields, shot, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
+      pingAdmin("topups", tref.id);
       closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s");
     } catch(err){ console.error(err); toast("تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
   };
 };
+
+/* admin push ping (worker sends the notification) */
+function pingAdmin(type, id){
+  const u = S.settings?.push?.worker; if (!u || !/^https:\/\//.test(u)) return;
+  try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ type, id }), keepalive:true }).catch(()=>{}); } catch {}
+}
 
 /* tickets */
 async function sendTicket(e){
