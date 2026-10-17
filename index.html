@@ -633,9 +633,9 @@ onAuthStateChanged(auth, async u => {
   const mine = c => query(collection(db, c), where("uid","==",u.uid));
   S.unsubs.push(
     onSnapshot(doc(db,"users",u.uid), s => { S.me = s.exists() ? { id:s.id, ...s.data() } : null; render(); }),
-    onSnapshot(mine("orders"),  s => { S.orders  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); bell(); }),
-    onSnapshot(mine("topups"),  s => { S.topups  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); bell(); }),
-    onSnapshot(mine("tickets"), s => { S.tickets = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); bell(); })
+    onSnapshot(mine("orders"),  s => { S.orders  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); }),
+    onSnapshot(mine("topups"),  s => { S.topups  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); }),
+    onSnapshot(mine("tickets"), s => { S.tickets = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); })
   );
   show("app");
   if (!location.hash) location.hash = "#home"; else render();
@@ -693,7 +693,7 @@ home(){
   <div class="topbar">
     ${balChip()}
     <div class="brand"><img class="mk" src="img/mark.png" alt=""><img class="wm" src="img/wordmark.png" alt="CARD PLAY"></div>
-    <button class="icon-btn" id="bellBtn">${ic("bell")}<i class="dot hidden" id="bellDot"></i></button>
+    <span style="width:96px"></span>
   </div>
   <div class="home-top"><div class="banners"><div class="b-track" id="bTrack">${bannersArr.map(b => b._def ? `
     <div class="b-slide b-def"><img class="art" src="img/mark.png" alt=""><div class="b-txt"><h3>اشحن ألعابك الآن</h3><p>بأسرع وأسهل طريقة</p><button class="cta" onclick="pickCat('games')">اكتشف المزيد</button></div></div>` : `
@@ -797,7 +797,6 @@ info(){
 const AFTER = {
   home(){
     const q = $("#q"); if (q) q.oninput = () => { S.q = q.value; clearTimeout(rT); rT = setTimeout(render, 160); };
-    $("#bellBtn").onclick = openBell; bell();
     document.querySelectorAll("[data-blink]").forEach(b => b.onclick = () => bannerGo(b.dataset.blink));
     slider();
   },
@@ -1026,21 +1025,6 @@ async function saveInfo(e){
   busy(btn,false);
 }
 
-/* notifications */
-function notifs(){
-  const n = [];
-  S.orders.forEach(o => { if (o.status!=="pending") n.push({ t:ms(o.updatedAt), txt:`طلبك ${o.productName} (#${o.no}): ${(STATUS[o.status]||{}).t}`, go:()=>openOrder(o.id) }); });
-  S.topups.forEach(t => { if (t.status!=="pending" && t.method!=="admin") n.push({ t:ms(t.updatedAt), txt:`طلب شحن ${(t.amount/100).toFixed(2)} ${t.cur||curOf(t.wallet||t.method)}: ${t.status==="approved"?"تمت الموافقة ✓":"مرفوض"}` });
-    if (t.method==="admin") n.push({ t:ms(t.createdAt), txt:`${t.amount<0?"تم خصم":"تمت إضافة"} ${(Math.abs(t.amount)/100).toFixed(2)} ${curOf(t.wallet)} ${t.amount<0?"من":"إلى"} محفظة ${W(t.wallet).name}` }); });
-  S.tickets.forEach(t => { if (t.reply) n.push({ t:ms(t.updatedAt), txt:`رد الدعم على تذكرتك: ${t.type}`, go:()=>{ location.hash="#support"; } }); });
-  return n.filter(x=>x.t).sort((a,b)=>b.t-a.t).slice(0,20);
-}
-function bell(){ const d = $("#bellDot"); if (!d) return; const last = +(lsGet("cp_seen")||0); d.classList.toggle("hidden", !notifs().some(x=>x.t>last)); }
-function openBell(){
-  const list = notifs(); lsSet("cp_seen", Date.now()); bell();
-  openSheet(`<h3>الإشعارات</h3>${list.length ? `<div class="list">${list.map((x,i)=>`<div class="tx" data-n="${i}"><span class="ic">${ic("bell")}</span><div class="t"><b style="white-space:normal">${esc(x.txt)}</b><small style="display:block">${fdate({toMillis:()=>x.t})}</small></div></div>`).join("")}</div>` : `<div class="empty">${ic("bell")}<div>لا توجد إشعارات</div></div>`}`);
-  document.querySelectorAll("[data-n]").forEach(el => { const x = list[+el.dataset.n]; if (x.go) el.onclick = () => { closeSheet(); setTimeout(x.go, 300); }; });
-}
 </script>
 </body>
 </html>

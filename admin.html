@@ -222,8 +222,7 @@ const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","�
 function draw(){
   if ($("#panel").classList.contains("hidden")) return;
   const pend = { orders: D.orders.filter(o=>o.status==="pending").length, topups: D.topups.filter(t=>t.status==="pending").length, tickets: D.tickets.filter(t=>t.status==="open").length };
-  document.title = (pend.orders+pend.topups ? `(${pend.orders+pend.topups}) ` : "") + "لوحة التحكم — Card Play";
-  $("#tabs").innerHTML = TABS.map(([k,t]) => `<button class="${tab===k?"on":""}" data-t="${k}">${t}${pend[k]?`<span class="cnt">${pend[k]}</span>`:""}</button>`).join("");
+  $("#tabs").innerHTML = TABS.map(([k,t]) => `<button class="${tab===k?"on":""}" data-t="${k}">${t}</button>`).join("");
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => { tab=b.dataset.t; draw(); window.scrollTo(0,0); });
   const keep = document.activeElement?.id, caret = document.activeElement?.selectionStart;
   if (tab==="settings" && $("#main").dataset.t==="settings") return; // don't wipe the settings form while editing
