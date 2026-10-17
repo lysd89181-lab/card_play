@@ -24,7 +24,9 @@ input,select,textarea{font:inherit;color:inherit}
 .wrap{max-width:1000px;margin:0 auto;padding:14px 14px calc(30px + var(--safe-b))}
 header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 header img{height:36px;filter:drop-shadow(0 0 10px rgba(30,123,255,.6))}
-header h1{flex:1;font-size:18px;font-weight:800}
+header h1{flex:1;font-size:18px;font-weight:800;min-width:0}
+header .btn{padding:7px 10px;flex-shrink:0}
+@media (max-width:420px){header h1 small{display:none}header h1{font-size:16px}}
 header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .tabs{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;margin-bottom:12px;padding-bottom:2px;position:sticky;top:0;z-index:5;background:rgba(5,10,22,.9);backdrop-filter:blur(10px);padding:8px 0}
 .tabs::-webkit-scrollbar{display:none}
@@ -118,10 +120,9 @@ textarea.inp{min-height:80px;resize:vertical}
   </section>
 
   <section id="panel" class="hidden">
-    <header><img src="img/mark.png" alt=""><h1>لوحة التحكم<small id="who"></small></h1><a class="btn btn-o" href="./" target="_blank">الموقع</a><button class="btn btn-o" id="out">خروج</button></header>
+    <header><img src="img/mark.png" alt=""><h1>لوحة التحكم<small id="who"></small></h1><button class="btn btn-o" id="nBtn" title="الإشعارات">🔔</button><a class="btn btn-o" href="./" target="_blank">الموقع</a><button class="btn btn-o" id="out">خروج</button></header>
     <nav class="tabs" id="tabs"></nav>
     <main id="main"></main>
-    <a href="https://wa.me/218920414760" target="_blank" rel="noopener" style="display:block;text-align:center;margin:26px 0 6px;font-size:12.5px;color:var(--dim)">الدعم الفني والتطوير: <b style="color:var(--muted)">كاردو</b> · واتساب <span class="num">0920414760</span></a>
   </section>
 </div>
 <div class="sheet-bg" id="sbg"></div>
@@ -201,7 +202,7 @@ let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "ope
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
 onAuthStateChanged(auth, async u => {
-  unsubs.forEach(f=>f()); unsubs=[];
+  unsubs.forEach(f=>f()); unsubs=[]; for (const k in seenFirst) delete seenFirst[k];
   if (!u) return scr("login");
   let ok = false;
   try { ok = (await getDoc(doc(db,"admins",u.uid))).exists(); } catch {}
@@ -209,6 +210,7 @@ onAuthStateChanged(auth, async u => {
   $("#who").textContent = u.email || "";
   scr("panel");
   const live = (q, key, sort=true) => unsubs.push(onSnapshot(q, s => {
+    watchNew(key, s);
     D[key] = s.docs.map(d=>({id:d.id,...d.data()})); if (sort) D[key].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw();
   }, e => console.error(key, e)));
   live(query(collection(db,"orders"), orderBy("createdAt","desc"), limit(400)), "orders");
@@ -221,6 +223,51 @@ onAuthStateChanged(auth, async u => {
 });
 let openUser = null;
 async function loadUsers(){}
+
+/* ================= admin notifications ================= */
+const lsG = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsS = (k,v) => { try { localStorage.setItem(k,v); } catch {} };
+const seenFirst = {};
+let swReg = null;
+const notifOn = () => lsG("cp_admin_notif") === "1" && "Notification" in window && Notification.permission === "granted";
+function nBtnUI(){ const b = $("#nBtn"); if (!b) return; const on = notifOn(); b.textContent = on ? "🔔" : "🔕"; b.style.borderColor = on ? "rgba(34,197,94,.6)" : ""; b.title = on ? "الإشعارات مفعّلة — اضغط للإيقاف" : "تفعيل الإشعارات"; }
+async function getSW(){
+  if (swReg || !("serviceWorker" in navigator)) return swReg;
+  try { swReg = await navigator.serviceWorker.register("sw.js", { scope:"./admin" }); await navigator.serviceWorker.ready; } catch(e){ console.warn(e); }
+  return swReg;
+}
+$("#nBtn").onclick = async () => {
+  if (!("Notification" in window)) return toast("المتصفح هذا ما يدعمش الإشعارات","e");
+  if (notifOn()) { lsS("cp_admin_notif","0"); nBtnUI(); return toast("تم إيقاف الإشعارات","s"); }
+  const p = await Notification.requestPermission();
+  if (p !== "granted") return toast("لازم تسمح بالإشعارات من إعدادات المتصفح","e");
+  lsS("cp_admin_notif","1"); await getSW(); nBtnUI(); beep();
+  notify("تم تفعيل الإشعارات ✓", "توصلك إشعارات الطلبات وطلبات الشحن الجديدة");
+};
+let actx;
+function beep(){ try { actx = actx || new (window.AudioContext||window.webkitAudioContext)(); const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "sine"; o.frequency.value = 880; g.gain.setValueAtTime(.0001, actx.currentTime); g.gain.exponentialRampToValueAtTime(.3, actx.currentTime+.02);
+  g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime+.45); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+.5); } catch {} }
+async function notify(title, body, tag){
+  if (!notifOn()) return;
+  beep();
+  const opt = { body, tag: tag || String(Date.now()), icon:"img/icon-192.png", badge:"img/icon-192.png", dir:"rtl", lang:"ar", renotify:true, data:{ url: location.href } };
+  const reg = await getSW();
+  try { if (reg) return reg.showNotification(title, opt); new Notification(title, opt); } catch(e){ try { new Notification(title, opt); } catch {} }
+}
+function watchNew(key, snap){
+  if (key !== "orders" && key !== "topups") return;
+  if (!seenFirst[key]) { seenFirst[key] = true; return; }
+  snap.docChanges().forEach(ch => {
+    if (ch.type !== "added") return;
+    const d = ch.doc.data();
+    if (d.status !== "pending") return;
+    if (key === "orders") notify("🛒 طلب شراء جديد", `${d.uName||""} — ${d.productName||""} ${d.optionLabel||""} — ${((d.price||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "o"+ch.doc.id);
+    else notify("💰 طلب شحن جديد", `${d.uName||""} — محفظة ${d.methodName||""} — ${((d.amount||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "t"+ch.doc.id);
+  });
+}
+nBtnUI();
+if (notifOn()) getSW();
 
 /* ================= layout ================= */
 const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["settings","الإعدادات"]];
