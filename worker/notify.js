@@ -208,6 +208,7 @@ async function onNew(ctx, type, id) {
   if (exec?.state === "done") title = "✅ طلب نُفّذ تلقائياً";
   else if (exec?.state === "sent") title = "⏳ طلب أُرسل للمزوّد";
   else if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
+  else if (exec?.state === "test") title = "🧪 طلب تجريبي (ما اتنفذش)";
   const body = type === "orders"
     ? `${d.uName || ""} — ${d.productName || ""} ${d.optionLabel || ""} — ${money(d.price, d.cur)}${exec?.state === "failed" ? " — " + exec.err : ""}`
     : `${d.uName || ""} — محفظة ${d.methodName || ""} — ${money(d.amount, d.cur)}`;
@@ -252,17 +253,20 @@ async function execOrder(ctx, id, manual, supSettings) {
 
   // lock the order so nothing executes it twice
   const uuid = crypto.randomUUID();
-  if (!(await patchDoc(ctx, path, { sup: { state: "sending", id: link.id, type: link.type || "", uuid, at: new Date() } }, doc.updateTime)))
+  const sandbox = !!sup.sandbox;
+  if (!(await patchDoc(ctx, path, { sup: { state: "sending", id: link.id, type: link.type || "", uuid, sandbox, at: new Date() } }, doc.updateTime)))
     return { state: "skip", err: "الطلب قيد المعالجة" };
 
   const input = String(o.input || "");
-  const sandbox = !!sup.sandbox;
+  const fake = v => /^[xX*\-\s]+$/.test(String(v || ""));
+  const testDone = async (type) => { await patchDoc(ctx, path, { sup: { state: "test", id: link.id, type, uuid, sandbox: true, err: "🧪 تجربة ناجحة — الطلب ما اتنفذش فعلياً (وضع التجربة)", at: new Date() } }); return { state: "test" }; };
   let r;
   if (link.type === "digital") {
     const payload = { productID: link.id, env: sandbox ? "sandbox" : "production" };
     if (input && link.key) payload.optionalFields = { [link.key]: input };
     r = await lp(ctx, "POST", "/digital-products/payment", { json: payload });
     const d = r.data?.data;
+    if (r.ok && r.data?.status !== false && d && (sandbox || fake(d.secretNumber))) return await testDone("digital");
     if (r.ok && r.data?.status !== false && d && (d.secretNumber || d.serialNumber)) {
       const codes = Array.isArray(d.items) && d.items.length ? d.items : [d];
       const lines = codes.flatMap(c => [c.secretNumber && `${c.secretNumber}`, c.serialNumber && `Serial: ${c.serialNumber}`, c.exp_date && `Exp: ${c.exp_date}`]).filter(Boolean);
@@ -276,6 +280,7 @@ async function execOrder(ctx, id, manual, supSettings) {
     payload.env = sandbox ? "sandbox" : "production";
     r = await lp(ctx, "POST", "/social/pay", { json: payload });
     const d = r.data?.data;
+    if (r.ok && r.data?.status !== false && d && sandbox) return await testDone("social");
     if (r.ok && r.data?.status !== false && d) {
       const ref = String(d.order_id ?? d.id ?? "");
       await patchDoc(ctx, path, { status: "processing", sup: { state: "sent", id: link.id, type: "social", uuid, ref, ext: String(d.external_id ?? ""), at: new Date() }, updatedAt: new Date() });
@@ -301,7 +306,7 @@ async function syncOrders(ctx, ids, rateLimit) {
     const rows = await q.json();
     orders = (Array.isArray(rows) ? rows : []).filter(x => x.document).map(x => ({ id: x.document.name.split("/").pop(), updateTime: x.document.updateTime, data: decodeFields(x.document.fields || {}) }));
   }
-  orders = orders.filter(o => o.data.status === "processing" && o.data.sup?.state === "sent");
+  orders = orders.filter(o => o.data.status === "processing" && o.data.sup?.state === "sent" && !o.data.sup?.sandbox);
   if (rateLimit) orders = orders.filter(o => Date.now() - Date.parse(o.data.sup.checkedAt || 0) > 20000);
   if (!orders.length) return { checked: 0, updated: 0 };
 
@@ -319,7 +324,10 @@ async function syncOrders(ctx, ids, rateLimit) {
     const m = [s.ref, s.uuid, s.ext].map(String).map(k => seen.get(k)).find(Boolean);
     const st = String(m?.status || "").toLowerCase();
     const path = `orders/${o.id}`;
-    if (m && OK_ST.includes(st)) {
+    if (m && OK_ST.includes(st) && /^[xX*\-\s]+$/.test(String(m.delivery_data || ""))) {
+      await patchDoc(ctx, path, { sup: { ...s, state: "failed", err: "المزوّد رجّع كود تجريبي — راجع الطلب", checkedAt: new Date() } });
+      updated++;
+    } else if (m && OK_ST.includes(st)) {
       await patchDoc(ctx, path, { status: "done", delivery: String(m.delivery_data || m.code || "تم التنفيذ ✓"), sup: { ...s, state: "done", checkedAt: new Date() }, updatedAt: new Date() });
       updated++;
     } else if (m && BAD_ST.includes(st)) {

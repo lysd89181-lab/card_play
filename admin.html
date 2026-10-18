@@ -395,6 +395,7 @@ orders(){
   const today = new Date(); today.setHours(0,0,0,0);
   const todayN = D.orders.filter(o=>o.status!=="cancelled" && ms(o.createdAt)>=today.getTime()).length;
   return `<div class="stats"><div class="stat"><b>${c("pending")}</b><small>بانتظار التنفيذ</small></div><div class="stat"><b>${D.topups.filter(t=>t.status==="pending").length}</b><small>طلبات شحن</small></div><div class="stat"><b class="num">${todayN}</b><small>طلبات اليوم</small></div></div>
+  ${D.settings?.supplier?.enabled && D.settings?.supplier?.sandbox ? `<div class="box2" style="margin-bottom:10px;border-color:rgba(245,179,11,.6);background:rgba(245,179,11,.1)"><b style="color:var(--warn)">🧪 وضع التجربة شغّال</b><div class="m" style="color:var(--muted)">طلبات المزوّد ما تتنفذش فعلياً. قفله من الإعدادات ← المزوّد قبل البيع الحقيقي.</div></div>` : ""}
   ${D.settings?.supplier?.enabled && D.orders.some(o=>o.status==="processing"&&o.sup?.state==="sent") ? `<button class="btn btn-o w" style="margin-bottom:10px" onclick="supSync(this)">🔄 تحديث حالة طلبات المزوّد</button>` : ""}
   ${chips(ofil,[["pending","قيد التنفيذ",c("pending")],["processing","جاري",c("processing")],["done","مكتمل",c("done")],["cancelled","ملغي",c("cancelled")],["all","الكل",D.orders.length]],"setOf")}
   ${list.length ? list.map(o => { const st=STATUS[o.status]||STATUS.pending, p=D.products.find(x=>x.id===o.productId);
@@ -404,12 +405,12 @@ orders(){
       ${o.input?`<div class="kv"><span>البيانات:</span><b class="num">${esc(o.input)}</b>${cpb(o.input)}</div>`:""}
       <div class="kv"><span>السعر:</span><b>${money(o.price, o.cur)}</b>${o.wallet?` <span class="m">(${esc(WN(o.wallet))})</span>`:""}</div>
       ${o.delivery?`<div class="kv"><span>المُسلَّم:</span><b style="white-space:pre-line">${esc(o.delivery)}</b></div>`:""}
-      ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>`:""}
+      ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":o.sup.state==="test"?`<span style="color:var(--warn)">${esc(o.sup.err||"🧪 تجربة")}</span>`:`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>`:""}
       <div class="acts">
-        ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
+        ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed" || o.sup.state==="test") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
         ${o.status==="pending"?`<button class="btn btn-o" onclick="oProc('${o.id}')">جاري التنفيذ</button>`:""}
         ${o.status!=="cancelled"?`<button class="btn btn-ok" onclick="oDone('${o.id}')">${o.status==="done"?"تعديل التسليم":"تم التنفيذ"}</button>`:""}
-        ${o.status!=="cancelled"&&o.status!=="done"?`<button class="btn btn-x" onclick="oCancel('${o.id}')">إلغاء واسترجاع</button>`:""}
+        ${o.status!=="cancelled"?`<button class="btn btn-x" onclick="oCancel('${o.id}')">إلغاء واسترجاع</button>`:""}
       </div></div>`; }).join("") : `<div class="empty">لا توجد طلبات هنا</div>`}`;
 },
 topups(){
@@ -635,7 +636,7 @@ window.oCancel = id => {
     await runTransaction(db, async tx => {
       const r = doc(db,"orders",id), s = await tx.get(r); const d = s.data();
       if (d.status==="cancelled") throw new Error("الطلب ملغي مسبقاً");
-      tx.update(r, { status:"cancelled", refunded:true, adminNote:$("#cn").value.trim(), updatedAt:serverTimestamp() });
+      tx.update(r, { status:"cancelled", refunded:true, delivery:"", adminNote:$("#cn").value.trim(), updatedAt:serverTimestamp() });
       tx.update(doc(db,"users",d.uid), d.wallet ? { ["wallets."+d.wallet]: increment(d.price) } : { balance: increment(d.price) });
     });
     closeSheet(); toast("تم الإلغاء والاسترجاع ✓","s");
