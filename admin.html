@@ -433,7 +433,7 @@ products(){
   return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
-    ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن. اضغط تعديل وحط الأسعار</div>` : ""}
+    ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن.${(p.options||[]).some(o=>o.sup?.id) ? " استعمل «إعادة تسعير منتجات المزوّد»" : " اضغط تعديل وحط الأسعار"}</div>` : ""}
     <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
@@ -558,7 +558,7 @@ function fieldHTML([k,l,t,opts], v){
   if (t==="sel") return `<div class="fld"><label>${l}</label><select class="inp" data-k="${k}">${opts.map(([a,b])=>`<option value="${a}" ${v===a?"selected":""}>${b}</option>`).join("")}</select></div>`;
   if (t==="sup") { let o = null; try { o = v ? JSON.parse(v) : null; } catch {}
     return `<div class="fld supf"><label>${l}</label><input type="hidden" data-k="${k}" value="${esc(v||"")}">
-      <div class="suprow"><span class="supname">${o ? `🔗 ${esc(o.name)} <small>(${esc(o.type==="digital"?"كود فوري":"شحن")} · تكلفة ${esc(o.cost)} ${esc(o.cur||"")})</small>` : `<small style="color:var(--dim)">غير مربوطة — تنفيذ يدوي</small>`}</span>
+      <div class="suprow"><span class="supname">${o ? `🔗 ${esc(o.name)} <small>(${esc(o.type==="digital"?"رقمي":"شحن مباشر")} · تكلفة ${esc(o.cost)} ${esc(o.cur||"")})</small>` : `<small style="color:var(--dim)">غير مربوطة — تنفيذ يدوي</small>`}</span>
       <button type="button" class="btn btn-o" onclick="supPick(this)">${o?"تغيير":"اختيار"}</button>${o?`<button type="button" class="btn btn-x" onclick="supClear(this)">فك</button>`:""}</div></div>`; }
   if (t==="color") return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" type="color" value="${esc(v||"#2453B8")}" style="height:44px;padding:4px"></div>`;
   if (t==="multi") { const arr = Array.isArray(v) ? v : []; return `<div class="fld"><label>${l}</label><div style="display:flex;flex-wrap:wrap;gap:4px 14px">${opts.map(([a,b])=>`<label class="sw" style="margin:0"><input type="checkbox" data-k="${k}" data-mv="${a}" ${arr.includes(a)?"checked":""}> ${b}</label>`).join("")}</div></div>`; }
@@ -816,7 +816,7 @@ window.supImport = async () => {
       <input type="checkbox" data-id="${esc(x.p.id)}" ${picked.has(x.p.id)?"checked":""} ${dis?"disabled":""} style="width:20px;height:20px;accent-color:var(--blue)">
       ${thumb(x.p.image, x.p.name)}
       <span style="flex:1;min-width:0"><b class="h" style="font-size:14px">${esc(x.p.name)}</b>
-      <span class="m">${x.p.type==="digital"?"🎟️ كود":"⚡ شحن"}${x.p.label?` · يطلب: ${esc(x.p.label)}`:""} · تكلفة <b class="num">${x.p.price}</b> ${esc(x.p.cur)}${why?` · <span style="color:var(--warn)">${why}</span>`:""}</span></span></label>`; };
+      <span class="m">${x.p.type==="digital"?"🎟️ رقمي":"⚡ شحن مباشر"}${x.p.label?` · يطلب: ${esc(x.p.label)}`:""} · تكلفة <b class="num">${x.p.price}</b> ${esc(x.p.cur)}${why?` · <span style="color:var(--warn)">${why}</span>`:""}</span></span></label>`; };
   const folderRow = (id, name, img, n, sub) => `<button type="button" class="card spi folder" data-go="${esc(id)}" style="width:100%;text-align:right;display:flex;gap:10px;align-items:center">
       ${thumb(img, name)}<span style="flex:1"><b class="h" style="font-size:14.5px">📁 ${esc(name)}</b><span class="m">${n} منتج${sub?` · ${sub} أقسام فرعية`:""}</span></span><span style="color:var(--muted)">‹</span></button>`;
   const draw = () => {
@@ -861,7 +861,7 @@ function priceFromCost(cost, costCur, w, cfg){
 function marginsForm(saved){
   const usdRate = saved.__usd || 7;
   return `<div class="box2">${PAYS().filter(w=>w.enabled!==false).map(w => `<div class="g2" style="align-items:end"><div class="fld"><label>ربح ${esc(w.name)} %</label><input class="inp num" data-m="${esc(w.key)}" type="number" step="0.1" value="${saved[w.key] ?? 10}"></div>
-      <label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label></div>`).join("")}
+      <label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}"> ما يتباعش بهذي المحفظة</label></div>`).join("")}
     <div class="g2"><div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>
     <div class="fld"><label>تقريب سعر الدينار</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div></div>
     <p class="m" style="color:var(--muted);margin:0">سعر الدولار يُستعمل لتحويل تكلفة المزوّد لو كانت بالدولار، ولتسعير محفظة USDT.</p></div>`;
@@ -871,8 +871,9 @@ function readMargins(){
   document.querySelectorAll("[data-off]").forEach(i => off[i.dataset.off] = i.checked);
   const cfg = { m, off, usd: parseFloat($("#usdR")?.value) || 7, rnd: +$("#rnd")?.value || 1 };
   const prev = lsGetJ("cp_margins", {}); const keep = { ...prev, ...m, __usd: cfg.usd, __rnd: cfg.rnd };
-  Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
+  Object.keys(keep).forEach(k => { if (k.startsWith("off_")) delete keep[k]; });
   try { localStorage.setItem("cp_margins", JSON.stringify(keep)); } catch {}
+  if (!PAYS().some(w => w.enabled!==false && !off[w.key])) throw new Error("علّمت «ما يتباعش» على كل المحافظ — لازم محفظة وحدة على الأقل يتباع بيها");
   return cfg;
 }
 const pricesWith = (cost, cur, cfg) => { const prices = {}; PAYS().filter(w=>w.enabled!==false && !cfg.off[w.key]).forEach(w => prices[w.key] = priceFromCost(cost, cur, w, cfg)); return prices; };
@@ -884,8 +885,13 @@ window.supReprice = async () => {
     <p class="m" style="color:var(--muted);margin-bottom:10px">يحسب أسعار كل الباقات المربوطة (${linked.length} منتج) من جديد، من آخر تكلفة عند المزوّد + نسبة الربح. الباقات اليدوية ما تتأثرش.</p>
     <div class="fld"><label>المنتجات</label><select class="inp" id="rpScope"><option value="">كل منتجات المزوّد</option>${catTree().map(({c,depth}) => `<option value="${c.id}">${"— ".repeat(depth)}${esc(c.name)}</option>`).join("")}</select></div>
     ${marginsForm(saved)}
+    <div class="box2" id="rpPrev" style="margin-top:10px"></div>
     <button class="btn btn-p w" id="rpGo" style="margin-top:12px">تطبيق الأسعار الجديدة</button>`);
   $("#rnd").value = String(saved.__rnd || 1);
+  const sample = linked.flatMap(p => (p.options||[]).filter(o=>o.sup?.cost>0).map(o=>({ p, o }))).slice(0, 2);
+  const prev = () => { let cfg; try { cfg = readMargins(); } catch(e) { $("#rpPrev").innerHTML = `<span style="color:var(--err);font-weight:800">${esc(e.message)}</span>`; return; }
+    $("#rpPrev").innerHTML = `<b class="h" style="font-size:13.5px">معاينة</b>` + sample.map(({o}) => `<div class="m" style="margin-top:6px"><b>${esc(o.label)}</b> (تكلفة ${o.sup.cost} ${esc(o.sup.cur||"")}): ${Object.entries(pricesWith(o.sup.cost, o.sup.cur, cfg)).map(([k,v]) => `${esc(WN(k))} <b class="num">${(v/100).toFixed(2)}</b> ${esc(WC(k))}`).join(" · ")}</div>`).join(""); };
+  document.querySelectorAll("#sh input, #sh select").forEach(el => el.addEventListener("input", prev)); prev();
   $("#rpGo").onclick = () => busy($("#rpGo"), async () => {
     const cfg = readMargins(), scope = $("#rpScope").value;
     const inScope = id => { if (!scope) return true; let c = D.cats.find(x=>x.id===id); const seen = new Set(); while (c && !seen.has(c.id)) { if (c.id===scope) return true; seen.add(c.id); c = D.cats.find(x=>x.id===c.parent); } return false; };
