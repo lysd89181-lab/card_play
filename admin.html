@@ -430,7 +430,7 @@ topups(){
 },
 products(){
   const list = [...D.products].sort((a,b)=>(a.sort??999)-(b.sort??999));
-  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
+  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
     ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن. اضغط تعديل وحط الأسعار</div>` : ""}
@@ -848,6 +848,58 @@ window.supImport = async () => {
   box.querySelector("#siQ").oninput = draw; draw(); upd();
   box.querySelector("#siNext").onclick = () => { const items = [...picked.values()]; close(); supImportStep2(items); };
 };
+/* pricing from supplier cost: cost may be in LYD or USD; wallets may be LYD or USD */
+const isUSD = c => /\$|usd|usdt|دولار/i.test(String(c||""));
+function priceFromCost(cost, costCur, w, cfg){
+  const usd = cfg.usd || 7;
+  const costLYD = isUSD(costCur) ? cost * usd : cost;
+  const withProfit = costLYD * (1 + (cfg.m[w.key]||0)/100);
+  if (isUSD(w.cur)) return Math.max(1, Math.round(withProfit / usd * 100));
+  const c = Math.round(withProfit * 100), rnd = cfg.rnd || 1;
+  return Math.max(1, rnd > 1 ? Math.ceil(c / rnd) * rnd : c);
+}
+function marginsForm(saved){
+  const usdRate = saved.__usd || 7;
+  return `<div class="box2">${PAYS().filter(w=>w.enabled!==false).map(w => `<div class="g2" style="align-items:end"><div class="fld"><label>ربح ${esc(w.name)} %</label><input class="inp num" data-m="${esc(w.key)}" type="number" step="0.1" value="${saved[w.key] ?? 10}"></div>
+      <label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label></div>`).join("")}
+    <div class="g2"><div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>
+    <div class="fld"><label>تقريب سعر الدينار</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div></div>
+    <p class="m" style="color:var(--muted);margin:0">سعر الدولار يُستعمل لتحويل تكلفة المزوّد لو كانت بالدولار، ولتسعير محفظة USDT.</p></div>`;
+}
+function readMargins(){
+  const m = {}, off = {}; document.querySelectorAll("[data-m]").forEach(i => m[i.dataset.m] = parseFloat(i.value)||0);
+  document.querySelectorAll("[data-off]").forEach(i => off[i.dataset.off] = i.checked);
+  const cfg = { m, off, usd: parseFloat($("#usdR")?.value) || 7, rnd: +$("#rnd")?.value || 1 };
+  const prev = lsGetJ("cp_margins", {}); const keep = { ...prev, ...m, __usd: cfg.usd, __rnd: cfg.rnd };
+  Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
+  try { localStorage.setItem("cp_margins", JSON.stringify(keep)); } catch {}
+  return cfg;
+}
+const pricesWith = (cost, cur, cfg) => { const prices = {}; PAYS().filter(w=>w.enabled!==false && !cfg.off[w.key]).forEach(w => prices[w.key] = priceFromCost(cost, cur, w, cfg)); return prices; };
+window.supReprice = async () => {
+  const saved = lsGetJ("cp_margins", {});
+  const linked = D.products.filter(p => (p.options||[]).some(o => o.sup?.id));
+  if (!linked.length) return toast("ما فيش منتجات مربوطة بالمزوّد","e");
+  openSheet(`<h3>إعادة تسعير منتجات المزوّد<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <p class="m" style="color:var(--muted);margin-bottom:10px">يحسب أسعار كل الباقات المربوطة (${linked.length} منتج) من جديد، من آخر تكلفة عند المزوّد + نسبة الربح. الباقات اليدوية ما تتأثرش.</p>
+    <div class="fld"><label>المنتجات</label><select class="inp" id="rpScope"><option value="">كل منتجات المزوّد</option>${catTree().map(({c,depth}) => `<option value="${c.id}">${"— ".repeat(depth)}${esc(c.name)}</option>`).join("")}</select></div>
+    ${marginsForm(saved)}
+    <button class="btn btn-p w" id="rpGo" style="margin-top:12px">تطبيق الأسعار الجديدة</button>`);
+  $("#rnd").value = String(saved.__rnd || 1);
+  $("#rpGo").onclick = () => busy($("#rpGo"), async () => {
+    const cfg = readMargins(), scope = $("#rpScope").value;
+    const inScope = id => { if (!scope) return true; let c = D.cats.find(x=>x.id===id); const seen = new Set(); while (c && !seen.has(c.id)) { if (c.id===scope) return true; seen.add(c.id); c = D.cats.find(x=>x.id===c.parent); } return false; };
+    let live = new Map(); try { (await loadSup(true)).forEach(x => live.set(x.id, x)); } catch {}
+    const list = linked.filter(p => inScope(p.catId));
+    const b = writeBatch(db); let n = 0;
+    list.forEach(p => { const options = (p.options||[]).map(o => { if (!o.sup?.id) return o;
+      const lx = live.get(o.sup.id); const cost = lx?.price > 0 ? lx.price : o.sup.cost, cur = lx?.cur || o.sup.cur;
+      if (!(cost > 0)) return o;
+      return { ...o, prices: pricesWith(cost, cur, cfg), sup: { ...o.sup, cost, cur } }; });
+      b.update(doc(db,"products",p.id), { options, updatedAt: serverTimestamp() }); n++; });
+    await b.commit(); closeSheet(); toast(`تم تحديث أسعار ${n} منتج ✓`,"s");
+  });
+};
 const lsGetJ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 function supImportStep2(items){
   const saved = lsGetJ("cp_margins", {});
@@ -864,23 +916,15 @@ function supImportStep2(items){
       <label class="sw" style="margin:0"><input type="radio" name="mode" value="merge" ${saved.__mode==="merge"?"checked":""}> دمج منتجات كل قسم في منتج واحد بباقات</label>
     </div>
     <div class="sec">نسبة الربح</div>
-    <div class="box2">${PAYS().filter(w=>w.enabled!==false).map(w => `<div class="g2" style="align-items:end"><div class="fld"><label>ربح ${esc(w.name)} %</label><input class="inp num" data-m="${esc(w.key)}" type="number" step="0.1" value="${saved[w.key] ?? 10}"></div>
-      ${(w.cur||"")==="$" ? `<div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>` : `<label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label>`}</div>`).join("")}
-      <div class="fld" style="margin:0"><label>تقريب السعر</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div></div>
+    ${marginsForm(saved)}
     <button class="btn btn-p w" id="m2" style="margin-top:12px">جلب وإضافة</button>`);
   $("#rnd").value = String(saved.__rnd || 1);
   $("#m2").onclick = () => busy($("#m2"), async () => {
-    const m = {}, off = {}; document.querySelectorAll("[data-m]").forEach(i => m[i.dataset.m] = parseFloat(i.value)||0);
-    document.querySelectorAll("[data-off]").forEach(i => off[i.dataset.off] = i.checked);
-    const usd = parseFloat($("#usdR")?.value) || usdRate, rnd = +$("#rnd").value || 1;
+    const cfg = readMargins();
     const mk = $("#mkCats").checked, mode = document.querySelector("[name=mode]:checked").value, dst = $("#dstCat").value;
-    const keep = { ...m, __usd: usd, __rnd: rnd, __mk: mk, __mode: mode }; Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
-    try { localStorage.setItem("cp_margins", JSON.stringify(keep)); } catch {}
-    const round = c => rnd > 1 ? Math.ceil(c / rnd) * rnd : Math.round(c);
-    const pricesFor = x => { const prices = {};
-      PAYS().filter(w=>w.enabled!==false && !off[w.key]).forEach(w => { const base = x.p.price * (1 + (m[w.key]||0)/100);
-        prices[w.key] = (w.cur||"")==="$" ? Math.round(base / usd * 100) : round(Math.round(base * 100)); });
-      return prices; };
+    try { const k = lsGetJ("cp_margins", {}); k.__mk = mk; k.__mode = mode; localStorage.setItem("cp_margins", JSON.stringify(k)); } catch {}
+    if (!PAYS().some(w => w.enabled!==false && !cfg.off[w.key])) throw new Error("لازم محفظة وحدة على الأقل يتباع بيها");
+    const pricesFor = x => pricesWith(x.p.price, x.p.cur, cfg);
     const optOf = x => ({ label: x.p.name, prices: pricesFor(x), sup: { id:x.p.id, type:x.p.type, key:x.p.key, name:x.p.name, cost:x.p.price, cur:x.p.cur } });
 
     // categories (reuse ones created by an earlier import)
