@@ -66,6 +66,9 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .suppick{position:fixed;inset:0;z-index:60;background:rgba(0,4,14,.75);display:flex;align-items:flex-end;justify-content:center}
 .suppick-in{width:100%;max-width:640px;max-height:88vh;overflow:auto;background:linear-gradient(180deg,#0C1A38,#070F22);border:1px solid var(--line2);border-radius:22px 22px 0 0;padding:16px}
 .suppick-in h3{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.newch{display:flex;flex-direction:column;gap:10px}
+.newch .card{text-align:right;width:100%;margin:0}
+.newch .card .m{display:block;margin-top:4px}
 .perms{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
 .wrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wchip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:9px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
@@ -221,7 +224,7 @@ $("#lf").onsubmit = async e => { e.preventDefault(); $("#lErr").textContent=""; 
 $("#gB").onclick = async () => { const p=new GoogleAuthProvider(); try{ await signInWithPopup(auth,p);}catch(err){ if(err.code==="auth/popup-blocked") signInWithRedirect(auth,p); else $("#lErr").textContent="تعذر الدخول بـ Google"; } };
 $("#out").onclick = $("#out2").onclick = () => signOut(auth);
 
-const D = { staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
+const D = { cats:[], staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
 let stab = "wallets", stq = "";
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
@@ -245,6 +248,7 @@ onAuthStateChanged(auth, async u => {
   live(query(collection(db,"tickets"), orderBy("createdAt","desc"), limit(300)), "tickets");
   live(collection(db,"products"), "products", false);
   live(collection(db,"banners"), "banners", false);
+  live(collection(db,"categories"), "cats", false);
   unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
   if (ROLE === "staff") unsubs.push(onSnapshot(doc(db,"admins",u.uid), s => {
     if (!s.exists()) { unsubs.forEach(f=>f()); unsubs=[]; return scr("noadmin"); }
@@ -258,7 +262,7 @@ let openUser = null, ROLE = "owner", PERMS = [];
 const PERM_LIST = [["orders","الطلبات"],["topups","طلبات الشحن"],["tickets","التذاكر"],["products","المنتجات"],["banners","البانرات"],["users","عرض المستخدمين"],["balance","تعديل الأرصدة يدوياً"],["settings","الإعدادات"]];
 const DEF_PERMS = ["orders","topups","tickets"];
 const can = p => ROLE === "owner" || PERMS.includes(p);
-const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : TABS.map(t=>t[0]).filter(k => k !== "staff" && PERMS.includes(k));
+const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : TABS.map(t=>t[0]).filter(k => k !== "staff" && (PERMS.includes(k) || (k==="cats" && PERMS.includes("products"))));
 async function loadUsers(){}
 
 /* ================= server (worker) calls ================= */
@@ -359,7 +363,7 @@ let fcmRefreshed = false;
 function maybeRefreshFcm(){ if (fcmRefreshed || !notifOn() || !D.settings?.push?.vapid || !auth.currentUser) return; fcmRefreshed = true; fcmRegister().catch(e=>console.warn(e)); }
 
 /* ================= layout ================= */
-const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["staff","الموظفين"],["settings","الإعدادات"]];
+const TABS = [["orders","الطلبات"],["topups","الشحن"],["products","المنتجات"],["cats","الأقسام"],["banners","البانرات"],["users","المستخدمين"],["tickets","التذاكر"],["staff","الموظفين"],["settings","الإعدادات"]];
 function draw(){
   if ($("#panel").classList.contains("hidden")) return;
   const pend = { orders: D.orders.filter(o=>o.status==="pending").length, topups: D.topups.filter(t=>t.status==="pending").length, tickets: D.tickets.filter(t=>t.status==="open").length };
@@ -374,6 +378,10 @@ function draw(){
 }
 const chips = (cur, arr, fn) => `<div class="chips">${arr.map(([k,t,n])=>`<button class="${cur===k?"on":""}" onclick="${fn}('${k}')">${t}${n!=null?` (${n})`:""}</button>`).join("")}</div>`;
 window.setOf = k => { ofil=k; draw(); }; window.setTf = k => { tfil=k; draw(); }; window.setKf = k => { kfil=k; draw(); };
+const catSorted = () => [...D.cats].sort((a,b)=>(a.sort??999)-(b.sort??999));
+const catPath = id => { const out = []; const seen = new Set(); let c = D.cats.find(x=>x.id===id); while (c && !seen.has(c.id)) { seen.add(c.id); out.unshift(c.name); c = D.cats.find(x=>x.id===c.parent); } return out.join(" › "); };
+const catTree = (parent="", depth=0, skip=null) => catSorted().filter(c => (c.parent||"")===parent && c.id!==skip).flatMap(c => [{ c, depth }, ...catTree(c.id, depth+1, skip)]);
+const catOptions = (sel, skip) => `<option value="">— بدون قسم (يظهر في الرئيسية) —</option>` + catTree("",0,skip).map(({c,depth}) => `<option value="${c.id}" ${sel===c.id?"selected":""}>${"— ".repeat(depth)}${esc(c.name)}</option>`).join("");
 const pthumb = p => p?.image ? `<img class="thumb" src="${esc(p.image)}" alt="">` : `<div class="thumb">${esc((p?.name||"؟").slice(0,10))}</div>`;
 
 /* ================= views ================= */
@@ -419,9 +427,9 @@ topups(){
 },
 products(){
   const list = [...D.products].sort((a,b)=>(a.sort??999)-(b.sort??999));
-  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pEdit()">+ منتج جديد</button>${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
+  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
-    <div class="m">${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
+    <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
     <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
@@ -443,6 +451,18 @@ users(){
       <div class="top"><div class="t"><b class="h">${esc(u.name)}</b><div class="m"><span class="num">${esc(u.short)}</span> · ${esc(u.email)}${u.phone?` · <span class="num">${esc(u.phone)}</span>`:""}</div></div></div>
       <div class="wrow">${walletChips(u)}</div>
     </div>`).join("") || `<div class="empty">لا يوجد مستخدمين</div>`}`;
+},
+cats(){
+  const tree = catTree();
+  return `<div class="box2" style="margin-bottom:12px"><b class="h">الأقسام</b>
+    <p class="m" style="color:var(--muted);margin:4px 0 0">القسم الرئيسي يظهر في الصفحة الرئيسية، وتقدر تحط داخله أقسام فرعية (مثلاً: ببجي ← أكواد، شحن ID، عروض). وفي المنتج تختار في أي قسم يقعد.</p></div>
+  <button class="btn btn-p" style="margin-bottom:12px" onclick="cEdit()">+ قسم جديد</button>
+  ${tree.length ? tree.map(({c,depth}) => { const n = D.products.filter(p=>p.catId===c.id).length, sub = D.cats.filter(x=>x.parent===c.id).length;
+    return `<div class="card" style="margin-inline-start:${depth*18}px;${depth?"border-inline-start:3px solid var(--blue)":""}"><div class="top">${c.image?`<img class="thumb" src="${esc(c.image)}" alt="">`:`<div class="thumb">${esc(c.name.slice(0,8))}</div>`}
+      <div class="t"><b class="h">${esc(c.name)}</b><div class="m">${depth?"قسم فرعي":"قسم رئيسي"} · ${sub} أقسام فرعية · ${n} منتجات · ترتيب ${c.sort??"—"}</div></div>
+      <span class="badge ${c.active===false?"b-canc":"b-done"}">${c.active===false?"مخفي":"ظاهر"}</span></div>
+      <div class="acts"><button class="btn btn-o" onclick="cEdit('${c.id}')">تعديل</button><button class="btn btn-o" onclick="cEdit(null,'${c.id}')">+ قسم فرعي</button><button class="btn btn-x" onclick="cDel('${c.id}')">حذف</button></div></div>`; }).join("")
+  : `<div class="empty">ما فيش أقسام. المنتجات تظهر في الرئيسية مباشرة.</div>`}`;
 },
 staff(){
   const q = (stq||"").trim().toLowerCase();
@@ -698,12 +718,13 @@ window.kReply = id => {
 window.kClose = id => busy(null, async () => { await updateDoc(doc(db,"tickets",id), { status:"closed", updatedAt:serverTimestamp() }); });
 
 /* products */
-window.pEdit = id => {
-  const p = id ? D.products.find(x=>x.id===id) : { category:"games", active:true, options:[{label:"",price:""}], sort:(D.products.length+1) };
+window.pEdit = (id, draft) => {
+  const p = id ? D.products.find(x=>x.id===id) : (draft || { category:"games", active:true, options:[{label:"",price:""}], sort:(D.products.length+1) });
   let img = p.image || "";
   openSheet(`<h3>${id?"تعديل منتج":"منتج جديد"}<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <div class="fld"><label>اسم المنتج</label><input class="inp" id="pn" value="${esc(p.name||"")}" placeholder="مثال: PUBG UC"></div>
-    <div class="g2"><div class="fld"><label>القسم</label><select class="inp" id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}" ${p.category===k?"selected":""}>${v}</option>`).join("")}</select></div>
+    <div class="fld"><label>القسم</label><select class="inp" id="pcat">${catOptions(p.catId||"")}</select></div>
+    <div class="g2"><div class="fld"><label>التصنيف (فلتر الرئيسية)</label><select class="inp" id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}" ${p.category===k?"selected":""}>${v}</option>`).join("")}</select></div>
     <div class="fld"><label>الترتيب</label><input class="inp num" id="ps" type="number" value="${esc(p.sort??"")}"></div></div>
     <div class="fld"><label>وصف (اختياري)</label><textarea class="inp" id="pd" style="min-height:60px">${esc(p.description||"")}</textarea></div>
     <div class="fld"><label>الصورة (مربعة) — ارفع من الجهاز أو حط رابط</label><input class="inp" id="pf" type="file" accept="image/*"><input class="inp" id="pu" style="margin-top:6px" placeholder="أو رابط صورة https://..." dir="ltr" value="${img.startsWith("http")?esc(img):""}">
@@ -728,7 +749,7 @@ window.pEdit = id => {
       .filter(o => Object.keys(o.prices).length);
     if (!options.length) throw new Error("أضف باقة واحدة على الأقل بسعر في محفظة وحدة على الأقل");
     const url = $("#pu").value.trim(); if (url) img = url;
-    const data = { name, category:$("#pc").value, sort:Number($("#ps").value)||0, description:$("#pd").value.trim(), image:img,
+    const data = { name, catId:$("#pcat").value, category:$("#pc").value, sort:Number($("#ps").value)||0, description:$("#pd").value.trim(), image:img,
       needsInput:$("#pi").checked, inputLabel:$("#pil").value.trim(), inputHint:$("#pih").value.trim(), active:$("#pa").checked, options, updatedAt:serverTimestamp() };
     if (id) await updateDoc(doc(db,"products",id), data); else await addDoc(collection(db,"products"), { ...data, createdAt:serverTimestamp() });
     closeSheet(); toast("تم حفظ المنتج ✓","s");
@@ -755,6 +776,97 @@ window.supPick = async btn => {
       const v = JSON.stringify({ id:x.id, type:x.type, key:x.key, name:x.name, cost:x.price, cur:x.cur });
       supTarget.outerHTML = fieldHTML(["supj","ربط بمنتج المزوّد (تنفيذ تلقائي)","sup"], v); close(); }); };
   box.querySelector("#spQ").oninput = draw; draw();
+};
+window.pNew = () => {
+  const supOn = D.settings?.supplier?.enabled;
+  openSheet(`<h3>إضافة منتج<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="newch">
+      <button class="card" onclick="closeSheet();setTimeout(()=>pEdit(),250)"><b class="h">✍️ إضافة يدوية</b><span class="m">تكتب الاسم والصورة والباقات والأسعار بيدك، والتنفيذ يدوي.</span></button>
+      <button class="card" ${supOn?"":"disabled style='opacity:.5'"} onclick="closeSheet();setTimeout(()=>supImport(),250)"><b class="h">⚡ جلب من المزوّد</b><span class="m">${supOn?"تختار منتجات المزوّد، يتجيب الاسم والصورة والباقات، وتحط نسبة الربح. التنفيذ تلقائي.":"فعّل ربط المزوّد من الإعدادات ← المزوّد أولاً."}</span></button>
+    </div>`);
+};
+window.supImport = async () => {
+  const box = document.createElement("div"); box.className = "suppick";
+  box.innerHTML = `<div class="suppick-in"><h3>جلب من المزوّد<button type="button" class="btn btn-o" id="siX">✕</button></h3>
+    <p class="m" style="color:var(--muted);margin-bottom:8px">اختار الباقات اللي تبيها تكون في منتج واحد (مثلاً كل باقات شدات ببجي).</p>
+    <input class="inp" id="siQ" placeholder="ابحث بالاسم... (مثلاً PUBG)" dir="auto">
+    <div id="siL" style="margin-top:10px"><div class="empty">جاري التحميل...</div></div>
+    <div class="savebar"><button type="button" class="btn btn-p w" id="siNext" disabled>التالي</button></div></div>`;
+  document.body.appendChild(box);
+  const close = () => box.remove();
+  box.querySelector("#siX").onclick = close;
+  let list = []; const picked = new Map();
+  try { list = await loadSup(); } catch(e){ box.querySelector("#siL").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const draw = () => {
+    const q = box.querySelector("#siQ").value.trim().toLowerCase();
+    const f = list.filter(x => !q || x.name.toLowerCase().includes(q)).slice(0, 120);
+    box.querySelector("#siL").innerHTML = f.map(x => `<label class="card spi" style="display:flex;gap:10px;align-items:center;cursor:pointer">
+      <input type="checkbox" data-id="${esc(x.id)}" ${picked.has(x.id)?"checked":""} style="width:20px;height:20px;accent-color:var(--blue)">
+      ${x.image?`<img class="thumb" src="${esc(x.image)}" alt="">`:`<div class="thumb">${esc(x.name.slice(0,8))}</div>`}
+      <span style="flex:1;min-width:0"><b class="h" style="font-size:14px">${esc(x.name)}</b><span class="m">${x.type==="digital"?"كود فوري":"شحن"} · تكلفة <b class="num">${x.price}</b> ${esc(x.cur)}${x.available?"":" · <span style='color:var(--err)'>غير متوفر</span>"}</span></span></label>`).join("") || `<div class="empty">ما فيش نتائج</div>`;
+    box.querySelectorAll("[data-id]").forEach(cb => cb.onchange = () => { const x = list.find(y=>y.id===cb.dataset.id); cb.checked ? picked.set(x.id, x) : picked.delete(x.id); upd(); });
+  };
+  const upd = () => { const b = box.querySelector("#siNext"); b.disabled = !picked.size; b.textContent = picked.size ? `التالي (${picked.size} باقات)` : "التالي"; };
+  box.querySelector("#siQ").oninput = draw; draw();
+  box.querySelector("#siNext").onclick = () => { const items = [...picked.values()]; close(); supImportStep2(items); };
+};
+const lsGetJ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+function supImportStep2(items){
+  const saved = lsGetJ("cp_margins", {});
+  const usdRate = saved.__usd || 7;
+  openSheet(`<h3>نسبة الربح<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <p class="m" style="color:var(--muted);margin-bottom:10px">الأسعار تتحسب من تكلفة المزوّد + نسبة الربح لكل محفظة. تقدر تعدّل أي سعر بعدين.</p>
+    <div class="box2">${PAYS().filter(w=>w.enabled!==false).map(w => `<div class="g2" style="align-items:end"><div class="fld"><label>ربح ${esc(w.name)} %</label><input class="inp num" data-m="${esc(w.key)}" type="number" step="0.1" value="${saved[w.key] ?? 10}"></div>
+      ${(w.cur||"")==="$" ? `<div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>` : `<label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label>`}</div>`).join("")}</div>
+    <div class="fld" style="margin-top:10px"><label>تقريب السعر</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div>
+    <button class="btn btn-p w" id="m2">التالي: مراجعة المنتج</button>`);
+  $("#rnd").value = String(saved.__rnd || 1);
+  $("#m2").onclick = () => {
+    const m = {}, off = {}; document.querySelectorAll("[data-m]").forEach(i => m[i.dataset.m] = parseFloat(i.value)||0);
+    document.querySelectorAll("[data-off]").forEach(i => off[i.dataset.off] = i.checked);
+    const usd = parseFloat($("#usdR")?.value) || usdRate, rnd = +$("#rnd").value || 1;
+    const keep = { ...m, __usd: usd, __rnd: rnd }; Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
+    try { localStorage.setItem("cp_margins", JSON.stringify(keep)); } catch {}
+    const round = c => rnd > 1 ? Math.ceil(c / rnd) * rnd : Math.round(c);
+    const first = items[0];
+    const needKey = items.find(x => x.key);
+    const draft = {
+      name: first.name.replace(/\s*\d[\d,.]*\s*(UC|uc|شدة|شدات|جوهرة|\$)?\s*$/,"").trim() || first.name,
+      image: first.image || "", category:"games", active:true, sort: D.products.length+1,
+      needsInput: !!needKey, inputLabel: needKey?.label || "", inputHint:"",
+      options: items.map(x => { const prices = {};
+        PAYS().filter(w=>w.enabled!==false && !off[w.key]).forEach(w => { const base = x.price * (1 + (m[w.key]||0)/100);
+          prices[w.key] = (w.cur||"")==="$" ? Math.round(base / usd * 100) : round(Math.round(base * 100)); });
+        return { label: x.name, prices, sup: { id:x.id, type:x.type, key:x.key, name:x.name, cost:x.price, cur:x.cur } }; })
+    };
+    closeSheet(); setTimeout(() => { pEdit(null, draft); toast("راجع الاسم والقسم والأسعار واضغط حفظ","s"); }, 250);
+  };
+}
+window.cEdit = (id, parent) => {
+  const c = id ? D.cats.find(x=>x.id===id) : { active:true, parent: parent||"", sort: D.cats.length+1 };
+  let img = c.image || "";
+  openSheet(`<h3>${id?"تعديل قسم":"قسم جديد"}<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="fld"><label>اسم القسم</label><input class="inp" id="cn" value="${esc(c.name||"")}" placeholder="مثال: ببجي"></div>
+    <div class="fld"><label>داخل قسم</label><select class="inp" id="cp"><option value="">— قسم رئيسي —</option>${catTree("",0,id).map(({c:x,depth}) => `<option value="${x.id}" ${c.parent===x.id?"selected":""}>${"— ".repeat(depth)}${esc(x.name)}</option>`).join("")}</select></div>
+    <div class="fld"><label>وصف قصير (اختياري)</label><input class="inp" id="cd" value="${esc(c.desc||"")}"></div>
+    <div class="fld"><label>الصورة (مربعة)</label><input class="inp" id="cf" type="file" accept="image/*"><input class="inp" id="cu" style="margin-top:6px" placeholder="أو رابط صورة https://..." dir="ltr" value="${img.startsWith("http")?esc(img):""}"><div id="cv">${img?`<img class="preview" style="width:100px;height:100px" src="${esc(img)}">`:""}</div></div>
+    <div class="g2"><div class="fld"><label>الترتيب</label><input class="inp num" id="cs" type="number" value="${esc(c.sort??"")}"></div>
+    <label class="sw" style="align-self:end"><input type="checkbox" id="ca" ${c.active!==false?"checked":""}> ظاهر</label></div>
+    <button class="btn btn-p w" id="cB">حفظ القسم</button>`);
+  $("#cf").onchange = async () => { const f=$("#cf").files[0]; if(!f) return; img = await fileToDataURL(f, 320, 320, .82); $("#cu").value=""; $("#cv").innerHTML=`<img class="preview" style="width:100px;height:100px" src="${img}">`; };
+  $("#cB").onclick = () => busy($("#cB"), async () => {
+    const name = $("#cn").value.trim(); if (!name) throw new Error("اكتب اسم القسم");
+    const url = $("#cu").value.trim(); if (url) img = url;
+    const data = { name, parent:$("#cp").value, desc:$("#cd").value.trim(), image:img, sort:Number($("#cs").value)||0, active:$("#ca").checked, updatedAt:serverTimestamp() };
+    if (id) await updateDoc(doc(db,"categories",id), data); else await addDoc(collection(db,"categories"), data);
+    closeSheet(); toast("تم حفظ القسم ✓","s");
+  });
+};
+window.cDel = id => {
+  if (D.cats.some(x=>x.parent===id)) return toast("القسم فيه أقسام فرعية، احذفها أو انقلها قبل","e");
+  const n = D.products.filter(p=>p.catId===id).length;
+  if (!confirm(n ? `القسم فيه ${n} منتجات، حيرجعوا يظهروا في الرئيسية. حذف القسم؟` : "حذف القسم؟")) return;
+  busy(null, async () => { const b = writeBatch(db); D.products.filter(p=>p.catId===id).forEach(p => b.update(doc(db,"products",p.id), { catId:"" })); b.delete(doc(db,"categories",id)); await b.commit(); toast("تم الحذف","s"); });
 };
 window.pToggle = id => { const p=D.products.find(x=>x.id===id); busy(null, ()=>updateDoc(doc(db,"products",id), { active: p.active===false })); };
 window.pDel = id => { if (confirm("حذف المنتج نهائياً؟")) busy(null, async()=>{ await deleteDoc(doc(db,"products",id)); toast("تم الحذف","s"); }); };

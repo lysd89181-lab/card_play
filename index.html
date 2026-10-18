@@ -6,7 +6,26 @@
 <meta name="theme-color" content="#050A16">
 <title>Card Play — كارد بلاي</title>
 <meta name="description" content="كارد بلاي — اشحن ألعابك واشتري بطاقاتك واشتراكاتك بأسرع وأسهل طريقة في ليبيا">
-<link rel="icon" href="img/icon-192.png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="48x48" href="https://cardplay.com.ly/img/favicon-48.png">
+<link rel="icon" type="image/png" sizes="96x96" href="https://cardplay.com.ly/img/favicon-96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="https://cardplay.com.ly/img/favicon-192.png">
+<link rel="canonical" href="https://cardplay.com.ly/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Card Play">
+<meta property="og:title" content="Card Play — كارد بلاي">
+<meta property="og:description" content="اشحن ألعابك واشتري بطاقاتك واشتراكاتك بأسرع وأسهل طريقة في ليبيا">
+<meta property="og:url" content="https://cardplay.com.ly/">
+<meta property="og:image" content="https://cardplay.com.ly/img/og.jpg">
+<meta property="og:locale" content="ar_LY">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://cardplay.com.ly/img/og.jpg">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+ {"@type":"Organization","@id":"https://cardplay.com.ly/#org","name":"Card Play","alternateName":"كارد بلاي","url":"https://cardplay.com.ly/","logo":{"@type":"ImageObject","url":"https://cardplay.com.ly/img/favicon-512.png","width":512,"height":512}},
+ {"@type":"WebSite","@id":"https://cardplay.com.ly/#site","name":"Card Play","alternateName":"كارد بلاي","url":"https://cardplay.com.ly/","publisher":{"@id":"https://cardplay.com.ly/#org"},"inLanguage":"ar"}
+]}
+</script>
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -137,6 +156,17 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .pcard .meta{padding:7px 6px 9px}
 .pcard .nm{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pcard .pr{font-size:11.5px;color:var(--blue2);font-weight:700}
+.cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+.ccard{position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--line);background:var(--card);aspect-ratio:1;display:block;transition:.2s}
+.ccard img,.ccard .pph{width:100%;height:100%;object-fit:cover;display:grid}
+.ccard span{position:absolute;inset:auto 0 0 0;padding:22px 8px 8px;font-weight:800;font-size:13.5px;text-align:center;background:linear-gradient(transparent,rgba(3,8,20,.92))}
+.ccard:active{transform:scale(.97);border-color:var(--blue)}
+.cph{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle at 30% 20%,rgba(44,139,255,.55),rgba(11,61,156,.35) 60%,transparent),var(--card)}
+.cph svg{width:38%;height:38%;color:#cfe3ff;margin-bottom:18%}
+.chero{display:flex;align-items:center;gap:14px;padding:14px;border-radius:20px;background:var(--card);border:1px solid var(--line);margin-bottom:14px}
+.chero img{width:72px;height:72px;border-radius:16px;object-fit:cover;border:1px solid var(--line2);box-shadow:var(--glow)}
+.chero h2{font-size:19px;font-weight:900}.chero p{color:var(--muted);font-size:13px}
+@media (min-width:900px){ .cgrid{grid-template-columns:repeat(6,1fr);gap:14px} }
 .empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:14px}
 .empty svg{width:46px;height:46px;color:var(--dim);margin-bottom:8px}
 
@@ -316,7 +346,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 
 /* ---------- desktop ---------- */
 @media (hover:hover){
-  .pcard:hover,.cat:hover,.pm:hover,.ocard:hover,.ch:hover{border-color:var(--line2);transform:translateY(-2px)}
+  .pcard:hover,.ccard:hover,.cat:hover,.pm:hover,.ocard:hover,.ch:hover{border-color:var(--line2);transform:translateY(-2px)}
   .btn-p:hover{filter:brightness(1.1)}
   .menu a:hover,.menu button:hover{background:rgba(30,123,255,.07)}
 }
@@ -528,7 +558,7 @@ function pimg(p, cls="pimg"){
 }
 
 /* ================= state ================= */
-const S = { user:null, me:null, products:[], banners:[], settings:DEF_SETTINGS, orders:[], topups:[], tickets:[],
+const S = { cats:[], user:null, me:null, products:[], banners:[], settings:DEF_SETTINGS, orders:[], topups:[], tickets:[],
   cat:"all", q:"", showAll:false, otab:"all", htab:"all", unsubs:[], ready:{ products:false } };
 const set = (o) => ({ ...DEF_SETTINGS, ...o, support:{ ...DEF_SETTINGS.support, ...(o?.support||{}) },
   payments: (o?.payments && o.payments.length) ? o.payments : DEF_SETTINGS.payments });
@@ -654,6 +684,7 @@ onAuthStateChanged(auth, async u => {
 });
 // public data
 onSnapshot(collection(db,"products"), s => { S.products = s.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); S.ready.products=true; render(); }, ()=>{ S.ready.products=true; render(); });
+onSnapshot(collection(db,"categories"), s => { S.cats = s.docs.map(d=>({id:d.id,...d.data()})).filter(c=>c.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
 onSnapshot(collection(db,"banners"), s => { S.banners = s.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
 onSnapshot(doc(db,"settings","app"), s => { S.settings = set(s.exists()? s.data() : {}); render(); }, ()=>{});
 
@@ -664,11 +695,11 @@ function show(which){
 }
 
 /* ================= router ================= */
-const ROOT = { home:"home", wallet:"wallet", orders:"orders", account:"account", channels:"account", support:"account", info:"account", history:"wallet" };
+const ROOT = { cat:"home", home:"home", wallet:"wallet", orders:"orders", account:"account", channels:"account", support:"account", info:"account", history:"wallet" };
 let curRoute = "";
 window.addEventListener("hashchange", () => { closeSheet(true); render(true); });
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => { location.hash = "#"+b.dataset.go; });
-function route(){ const r = location.hash.slice(1) || "home"; return ROOT[r] ? r : "home"; }
+function route(){ const r = location.hash.slice(1) || "home"; if (r.startsWith("c-")) { S.catId = r.slice(2); return "cat"; } return ROOT[r] ? r : "home"; }
 
 let rT;
 function render(scrollTop){
@@ -681,7 +712,7 @@ function render(scrollTop){
   const focused = document.activeElement?.id;
   const caret = document.activeElement?.selectionStart;
   const keepVals = {}; document.querySelectorAll("#view [data-keep]").forEach(el => keepVals[el.id] = el.value);
-  $("#view").innerHTML = `<div class="view ${r==="home"||r==="wallet"?"":"narrow"}">${VIEWS[r]()}</div>`;
+  $("#view").innerHTML = `<div class="view ${r==="home"||r==="wallet"||r==="cat"?"":"narrow"}">${VIEWS[r]()}</div>`;
   Object.entries(keepVals).forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.value=v; });
   if (focused) { const el = document.getElementById(focused); if (el && el.tagName==="INPUT"){ el.focus(); try{ el.setSelectionRange(caret,caret);}catch{} } }
   AFTER[r]?.();
@@ -692,13 +723,20 @@ const back = to => `<button class="icon-btn back" onclick="${to ? `location.hash
 const pagebar = (title, to, act="") => `<div class="pagebar">${back(to)}<h1>${title}</h1>${act}</div>`;
 const balance = () => wbal(defW());
 const minPrice = (p, k) => { const v = (p.options||[]).map(o=>priceFor(o,k)).filter(x=>x>0); return v.length ? Math.min(...v) : 0; };
+const pcardHTML = p => `<button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div>${(()=>{ const k=defW(), m=minPrice(p,k); return m ? `<div class="pr">من ${money(m, curOf(k))}</div>` : `<div class="pr" style="color:var(--dim)">غير متوفر</div>`; })()}</div></button>`;
+const subCats = pid => S.cats.filter(c => (c.parent||"") === (pid||""));
+const catAlive = id => { const seen = new Set(); let c = S.cats.find(x=>x.id===id); while (c) { if (seen.has(c.id)) return false; seen.add(c.id); if (!c.parent) return true; c = S.cats.find(x=>x.id===c.parent); } return false; };
+const catHasContent = id => S.products.some(p=>p.catId===id) || subCats(id).some(c=>catHasContent(c.id));
+const ccardHTML = c => `<a class="ccard" href="#c-${c.id}">${c.image?`<img src="${esc(c.image)}" alt="" loading="lazy">`:`<div class="cph">${ic("grid")}</div>`}<span>${esc(c.name)}</span></a>`;
 const balChip = () => { const k = defW(); return `<button class="bal-chip" onclick="openWSwitch()"><small>محفظة ${esc(W(k).name)} ▾</small><b>${money(wbal(k), curOf(k))}</b></button>`; };
 
 /* ================= views ================= */
 const VIEWS = {
 home(){
   const q = S.q.trim().toLowerCase();
-  let list = S.products.filter(p => (S.cat==="all" || p.category===S.cat) && (!q || (p.name||"").toLowerCase().includes(q)));
+  const filtering = !!q || S.cat!=="all";
+  let list = S.products.filter(p => (S.cat==="all" || p.category===S.cat) && (!q || (p.name||"").toLowerCase().includes(q)) && (filtering || !p.catId || !catAlive(p.catId)));
+  const tops = filtering ? [] : subCats("").filter(c => catHasContent(c.id));
   const limited = !S.showAll && !q && S.cat==="all" ? list.slice(0,9) : list;
   const bannersArr = S.banners.length ? S.banners : [{ _def:true }];
   return `
@@ -713,12 +751,22 @@ home(){
   </div><div class="dots" id="bDots">${bannersArr.length>1 ? bannersArr.map((_,i)=>`<i class="${i?"":"on"}"></i>`).join("") : ""}</div></div>
   <div class="home-side"><label class="search">${ic("search")}<input id="q" data-keep placeholder="ابحث عن بطاقة أو لعبة..." value="${esc(S.q)}" autocomplete="off"></label>
   <div class="cats">${CATS.slice(1).map(c => `<button class="cat ${S.cat===c.key?"on":""}" onclick="pickCat('${c.key}')">${ic(c.icon)}${c.name}</button>`).join("")}</div></div></div>
-  <div class="sec-h"><h2>${S.cat==="all" ? (q ? "نتائج البحث" : "أحدث المنتجات") : CATS.find(c=>c.key===S.cat).name}</h2>
+  ${tops.length ? `<div class="sec-h"><h2>الأقسام</h2></div><div class="cgrid">${tops.map(ccardHTML).join("")}</div>` : ""}
+  ${!filtering && tops.length && !list.length ? "" : `<div class="sec-h"><h2>${S.cat==="all" ? (q ? "نتائج البحث" : (tops.length ? "منتجات أخرى" : "أحدث المنتجات")) : CATS.find(c=>c.key===S.cat).name}</h2>
     ${S.cat!=="all" ? `<button onclick="pickCat('all')">عرض الكل</button>` : (list.length>9 && !q ? `<button onclick="toggleAll()">${S.showAll?"عرض أقل":"عرض الكل"}</button>` : "")}</div>
   ${!S.ready.products ? `<div class="grid">${Array(6).fill('<div class="pcard"><div class="pph skel"></div><div class="meta"><div class="nm skel" style="height:12px;border-radius:6px"></div></div></div>').join("")}</div>`
-    : limited.length ? `<div class="grid">${limited.map(p => `
-      <button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div>${(()=>{ const k=defW(), m=minPrice(p,k); return m ? `<div class="pr">من ${money(m, curOf(k))}</div>` : `<div class="pr" style="color:var(--dim)">غير متوفر</div>`; })()}</div></button>`).join("")}</div>`
-    : `<div class="empty">${ic("search")}<div>${q ? "ما في نتائج لبحثك" : "لا توجد منتجات حالياً"}</div></div>`}`;
+    : limited.length ? `<div class="grid">${limited.map(pcardHTML).join("")}</div>`
+    : `<div class="empty">${ic("search")}<div>${q ? "ما في نتائج لبحثك" : "لا توجد منتجات حالياً"}</div></div>`}`}`;
+},
+cat(){
+  const c = S.cats.find(x=>x.id===S.catId);
+  if (!c) return `${pagebar("القسم","home")}<div class="empty">${ic("grid")}<div>القسم غير موجود</div></div>`;
+  const subs = subCats(c.id).filter(x=>catHasContent(x.id));
+  const prods = S.products.filter(p=>p.catId===c.id);
+  return `${pagebar(esc(c.name), c.parent ? "c-"+c.parent : "home")}
+  ${c.image?`<div class="chero"><img src="${esc(c.image)}" alt=""><div><h2>${esc(c.name)}</h2>${c.desc?`<p>${esc(c.desc)}</p>`:""}</div></div>`:""}
+  ${subs.length ? `<div class="cgrid">${subs.map(ccardHTML).join("")}</div>` : ""}
+  ${prods.length ? `${subs.length?`<div class="sec-h" style="margin-top:6px"><h2>المنتجات</h2></div>`:""}<div class="grid">${prods.map(pcardHTML).join("")}</div>` : (subs.length ? "" : `<div class="empty">${ic("grid")}<div>لا توجد منتجات في هذا القسم حالياً</div></div>`)}`;
 },
 wallet(){
   const ps = pays(), dk = defW();
