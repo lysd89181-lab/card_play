@@ -163,7 +163,7 @@ function normProduct(p) {
   const ptype = String(p.product_type || "").toLowerCase();
   return {
     id: String(p.id), name: p.name || "", image: p.image || p.photo || "",
-    price: Number(p.selling_price ?? p.final_price ?? p.price ?? 0), cur: p.currency_sign || p.currency_code || "",
+    price: [p.selling_price, p.final_price, p.price, p.fixed_price, p.original_price].map(Number).find(v => isFinite(v) && v > 0) || 0, cur: p.currency_sign || p.currency_code || "",
     type: digital ? "digital" : "social", key, label,
     amount: !digital && (ptype === "amount" || !!(p.qty_values && p.qty_values.min && Number(p.qty_values.min) > 1)),
     available: p.available !== false

@@ -723,7 +723,11 @@ const back = to => `<button class="icon-btn back" onclick="${to ? `location.hash
 const pagebar = (title, to, act="") => `<div class="pagebar">${back(to)}<h1>${title}</h1>${act}</div>`;
 const balance = () => wbal(defW());
 const minPrice = (p, k) => { const v = (p.options||[]).map(o=>priceFor(o,k)).filter(x=>x>0); return v.length ? Math.min(...v) : 0; };
-const pcardHTML = p => `<button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div>${(()=>{ const k=defW(), m=minPrice(p,k); return m ? `<div class="pr">من ${money(m, curOf(k))}</div>` : `<div class="pr" style="color:var(--dim)">غير متوفر</div>`; })()}</div></button>`;
+const priceTag = p => { const k = defW(), m = minPrice(p, k);
+  if (m) return `<div class="pr">من ${money(m, curOf(k))}</div>`;
+  const alt = pays().map(w => ({ w, v: minPrice(p, w.key) })).filter(x => x.v > 0)[0];
+  return alt ? `<div class="pr">من ${money(alt.v, curOf(alt.w.key))}<small style="display:block;color:var(--muted);font-size:10.5px;font-weight:600">بمحفظة ${esc(alt.w.name)}</small></div>` : `<div class="pr" style="color:var(--dim)">غير متوفر</div>`; };
+const pcardHTML = p => `<button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div>${priceTag(p)}</div></button>`;
 const subCats = pid => S.cats.filter(c => (c.parent||"") === (pid||""));
 const catAlive = id => { const seen = new Set(); let c = S.cats.find(x=>x.id===id); while (c) { if (seen.has(c.id)) return false; seen.add(c.id); if (!c.parent) return true; c = S.cats.find(x=>x.id===c.parent); } return false; };
 const catHasContent = id => S.products.some(p=>p.catId===id) || subCats(id).some(c=>catHasContent(c.id));

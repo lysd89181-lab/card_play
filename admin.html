@@ -433,6 +433,7 @@ products(){
   return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
+    ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن. اضغط تعديل وحط الأسعار</div>` : ""}
     <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
@@ -807,10 +808,10 @@ window.supImport = async () => {
   const picked = new Map();             // supplier product id -> { p, root, sub }
   let path = [];                         // [rootId] or [rootId, subId]
   const all = []; tree.forEach(c => { c.products.forEach(p => all.push({ p, root:c, sub:null })); c.subs.forEach(sc => sc.products.forEach(p => all.push({ p, root:c, sub:sc }))); });
-  const okItem = x => x.p.available && !x.p.amount && !have.has(x.p.id);
+  const okItem = x => x.p.available && !x.p.amount && x.p.price > 0 && !have.has(x.p.id);
   const thumb = (img, name) => img ? `<img class="thumb" src="${esc(img)}" alt="" loading="lazy">` : `<div class="thumb">${esc((name||"").slice(0,8))}</div>`;
   const prodRow = x => { const dis = !okItem(x);
-    const why = have.has(x.p.id) ? "مضاف عندك" : !x.p.available ? "غير متوفر" : x.p.amount ? "بالكمية — غير مدعوم" : "";
+    const why = have.has(x.p.id) ? "مضاف عندك" : !x.p.available ? "غير متوفر" : x.p.amount ? "بالكمية — غير مدعوم" : !(x.p.price > 0) ? "بدون سعر عند المزوّد" : "";
     return `<label class="card spi" style="display:flex;gap:10px;align-items:center;${dis?"opacity:.5":"cursor:pointer"}">
       <input type="checkbox" data-id="${esc(x.p.id)}" ${picked.has(x.p.id)?"checked":""} ${dis?"disabled":""} style="width:20px;height:20px;accent-color:var(--blue)">
       ${thumb(x.p.image, x.p.name)}
