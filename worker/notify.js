@@ -140,7 +140,7 @@ async function lp(ctx, method, path, { query, form, json } = {}) {
   return { ok: r.ok, status: r.status, data };
 }
 const lpMsg = (r) => {
-  const m = r.data?.message || r.data?.error || r.data?.msg || (r.data?.errors && JSON.stringify(r.data.errors)) || "";
+  const m = (typeof r.data?.data === "string" ? r.data.data : "") || r.data?.message || r.data?.error || r.data?.msg || (r.data?.errors && JSON.stringify(r.data.errors)) || "";
   if (r.status === 400) return "رصيد المزوّد غير كافي";
   if (r.status === 401) return "مفاتيح المزوّد غير صحيحة";
   if (r.status === 422) return "المنتج غير موجود عند المزوّد أو بيانات ناقصة" + (m ? ` (${String(m).slice(0, 120)})` : "");
@@ -234,13 +234,13 @@ async function execOrder(ctx, id, manual, supSettings) {
   const sandbox = !!sup.sandbox;
   let r;
   if (link.type === "digital") {
-    const form = { productID: link.id };
-    if (sandbox) form.env = "sandbox";
-    if (input && link.key) { form["optionalFields[0][key]"] = link.key; form["optionalFields[0][value]"] = input; }
-    r = await lp(ctx, "POST", "/digital-products/payment", { form });
+    const payload = { productID: link.id, env: sandbox ? "sandbox" : "production" };
+    if (input && link.key) payload.optionalFields = { [link.key]: input };
+    r = await lp(ctx, "POST", "/digital-products/payment", { json: payload });
     const d = r.data?.data;
     if (r.ok && r.data?.status !== false && d && (d.secretNumber || d.serialNumber)) {
-      const lines = [d.secretNumber && `${d.secretNumber}`, d.serialNumber && `Serial: ${d.serialNumber}`, d.exp_date && `Exp: ${d.exp_date}`].filter(Boolean);
+      const codes = Array.isArray(d.items) && d.items.length ? d.items : [d];
+      const lines = codes.flatMap(c => [c.secretNumber && `${c.secretNumber}`, c.serialNumber && `Serial: ${c.serialNumber}`, c.exp_date && `Exp: ${c.exp_date}`]).filter(Boolean);
       await patchDoc(ctx, path, { status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, at: new Date() }, updatedAt: new Date() });
       return { state: "done" };
     }
@@ -248,7 +248,7 @@ async function execOrder(ctx, id, manual, supSettings) {
     const params = {};
     if (link.key) params[link.key] = input;
     const payload = { product_id: link.id, qty: 1, params, order_uuid: uuid };
-    if (sandbox) payload.env = "sandbox";
+    payload.env = sandbox ? "sandbox" : "production";
     r = await lp(ctx, "POST", "/social/pay", { json: payload });
     const d = r.data?.data;
     if (r.ok && r.data?.status !== false && d) {
@@ -263,6 +263,7 @@ async function execOrder(ctx, id, manual, supSettings) {
 }
 
 /* ================= sync social orders that are waiting at the supplier ================= */
+// supplier statuses: pending, wait, accept, reject
 const OK_ST = ["accept", "accepted", "complete", "completed", "done", "success", "successful", "delivered"];
 const BAD_ST = ["reject", "rejected", "cancel", "canceled", "cancelled", "fail", "failed", "refund", "refunded", "error"];
 async function syncOrders(ctx, ids, rateLimit) {
