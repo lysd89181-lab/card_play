@@ -61,6 +61,11 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .rows-box{border:none;padding:0}
 .box2{border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(10,22,46,.5)}
 .savebar{position:sticky;bottom:0;padding:10px 0 calc(6px + var(--safe-b));background:linear-gradient(transparent,rgba(5,10,22,.95) 30%);z-index:3}
+.suprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.supname{flex:1;min-width:0;font-size:13px;font-weight:700}
+.suppick{position:fixed;inset:0;z-index:60;background:rgba(0,4,14,.75);display:flex;align-items:flex-end;justify-content:center}
+.suppick-in{width:100%;max-width:640px;max-height:88vh;overflow:auto;background:linear-gradient(180deg,#0C1A38,#070F22);border:1px solid var(--line2);border-radius:22px 22px 0 0;padding:16px}
+.suppick-in h3{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .perms{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
 .wrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wchip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:9px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
@@ -256,6 +261,25 @@ const can = p => ROLE === "owner" || PERMS.includes(p);
 const allowedTabs = () => ROLE === "owner" ? TABS.map(t=>t[0]) : TABS.map(t=>t[0]).filter(k => k !== "staff" && PERMS.includes(k));
 async function loadUsers(){}
 
+/* ================= server (worker) calls ================= */
+async function api(action, extra = {}){
+  const url = D.settings?.push?.worker;
+  if (!url) throw new Error("مفتاح 1 غير مضبوط في الإعدادات");
+  const idToken = await auth.currentUser.getIdToken();
+  const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ action, idToken, ...extra }) });
+  const j = await r.json().catch(()=>({}));
+  if (r.status === 401 || r.status === 403) throw new Error("ما عندكش صلاحية لهذي العملية");
+  if (!j.ok && j.error) throw new Error("حدث خطأ في الاتصال بالمزوّد");
+  return j;
+}
+const SUPS = { list:null, loading:false };
+async function loadSup(force){
+  if (SUPS.list && !force) return SUPS.list;
+  SUPS.loading = true;
+  try { SUPS.list = (await api("sup_products")).products || []; } finally { SUPS.loading = false; }
+  return SUPS.list;
+}
+
 /* ================= admin notifications ================= */
 const lsG = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsS = (k,v) => { try { localStorage.setItem(k,v); } catch {} };
@@ -360,6 +384,7 @@ orders(){
   const today = new Date(); today.setHours(0,0,0,0);
   const todayN = D.orders.filter(o=>o.status!=="cancelled" && ms(o.createdAt)>=today.getTime()).length;
   return `<div class="stats"><div class="stat"><b>${c("pending")}</b><small>بانتظار التنفيذ</small></div><div class="stat"><b>${D.topups.filter(t=>t.status==="pending").length}</b><small>طلبات شحن</small></div><div class="stat"><b class="num">${todayN}</b><small>طلبات اليوم</small></div></div>
+  ${D.settings?.supplier?.enabled && D.orders.some(o=>o.status==="processing"&&o.sup?.state==="sent") ? `<button class="btn btn-o w" style="margin-bottom:10px" onclick="supSync(this)">🔄 تحديث حالة طلبات المزوّد</button>` : ""}
   ${chips(ofil,[["pending","قيد التنفيذ",c("pending")],["processing","جاري",c("processing")],["done","مكتمل",c("done")],["cancelled","ملغي",c("cancelled")],["all","الكل",D.orders.length]],"setOf")}
   ${list.length ? list.map(o => { const st=STATUS[o.status]||STATUS.pending, p=D.products.find(x=>x.id===o.productId);
     return `<div class="card"><div class="top">${pthumb(p||{name:o.productName})}<div class="t"><b class="h">${esc(o.productName)} — ${iso(esc(o.optionLabel))}</b>
@@ -367,8 +392,10 @@ orders(){
       <div class="kv"><span>العميل:</span><b>${esc(o.uName)} (<span class="num">${esc(o.uShort)}</span>)</b></div>
       ${o.input?`<div class="kv"><span>البيانات:</span><b class="num">${esc(o.input)}</b>${cpb(o.input)}</div>`:""}
       <div class="kv"><span>السعر:</span><b>${money(o.price, o.cur)}</b>${o.wallet?` <span class="m">(${esc(WN(o.wallet))})</span>`:""}</div>
-      ${o.delivery?`<div class="kv"><span>المُسلَّم:</span><b>${esc(o.delivery)}</b></div>`:""}
+      ${o.delivery?`<div class="kv"><span>المُسلَّم:</span><b style="white-space:pre-line">${esc(o.delivery)}</b></div>`:""}
+      ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>`:""}
       <div class="acts">
+        ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
         ${o.status==="pending"?`<button class="btn btn-o" onclick="oProc('${o.id}')">جاري التنفيذ</button>`:""}
         ${o.status!=="cancelled"?`<button class="btn btn-ok" onclick="oDone('${o.id}')">${o.status==="done"?"تعديل التسليم":"تم التنفيذ"}</button>`:""}
         ${o.status!=="cancelled"&&o.status!=="done"?`<button class="btn btn-x" onclick="oCancel('${o.id}')">إلغاء واسترجاع</button>`:""}
@@ -450,7 +477,7 @@ tickets(){
 settings(){
   const s = D.settings || {};
   const pays = PAYS();
-  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["support","الدعم والأسئلة"],["keys","المفاتيح"]];
+  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["supplier","المزوّد"],["support","الدعم والأسئلة"],["keys","المفاتيح"]];
   return `<form id="sf">
   <div class="chips stabs">${ST.map(([k,t])=>`<button type="button" class="${stab===k?"on":""}" data-st="${k}">${t}</button>`).join("")}</div>
 
@@ -462,6 +489,18 @@ settings(){
   <div class="spane" data-pane="channels" ${stab==="channels"?"":"hidden"}>
     <p class="m" style="color:var(--muted);margin:0 2px 10px">القنوات اللي تظهر للزبائن في صفحة «قنواتي».</p>
     ${rows("chs", CH_F, s.channels||[], r => `${esc(r.title||"قناة جديدة")}<small>${esc(r.handle||"")}</small>`)}
+  </div>
+
+  <div class="spane" data-pane="supplier" ${stab==="supplier"?"":"hidden"}>
+    <div class="box2">
+      <label class="sw"><input type="checkbox" id="supEn" ${s.supplier?.enabled?"checked":""}> تفعيل الربط مع المزوّد</label>
+      <label class="sw"><input type="checkbox" id="supAuto" ${s.supplier?.auto?"checked":""}> تنفيذ الطلبات تلقائياً (أول ما الزبون يشري)</label>
+      <label class="sw" style="margin:0"><input type="checkbox" id="supSb" ${s.supplier?.sandbox?"checked":""}> وضع التجربة (ما يتخصمش من رصيد المزوّد)</label>
+    </div>
+    <div class="box2" style="margin-top:10px;display:flex;align-items:center;gap:10px;justify-content:space-between">
+      <span id="supBal" class="m" style="color:var(--muted)">رصيدك عند المزوّد: —</span>
+      <button type="button" class="btn btn-o" id="supTest">فحص الاتصال</button></div>
+    <p class="m" style="color:var(--muted);margin:10px 2px 0;line-height:1.8">• تربط كل باقة بمنتج المزوّد من: المنتجات ← تعديل ← «ربط بمنتج المزوّد».<br>• الباقات اللي مش مربوطة تقعد تنفيذ يدوي عادي.<br>• لو فشل التنفيذ (مثلاً رصيدك عند المزوّد خلص)، الطلب يقعد قيد التنفيذ وتقدر تعاود ترسله أو تلغيه وترجّع المبلغ.</p>
   </div>
 
   <div class="spane" data-pane="keys" ${stab==="keys"?"":"hidden"}>
@@ -490,9 +529,13 @@ const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar
 const CH_F = [["type","النوع","sel",[["telegram","تيليجرام"],["whatsapp","واتساب"],["instagram","انستقرام"],["facebook","فيسبوك"],["tiktok","تيك توك"],["link","رابط"]]],["title","العنوان"],["handle","اليوزر / الوصف"],["url","الرابط"],["btn","نص الزر (اختياري)"]];
 const FAQ_F = [["q","السؤال"],["a","الجواب","ta"]];
 const optPrice = (o, k) => Number(o?.prices && (k in o.prices) ? o.prices[k] : (o?.price || 0)) || 0;
-const OPT_F_ = () => [["label","اسم الباقة"], ...PAYS().map(p => ["p_"+p.key, `سعر ${p.name} (${p.cur||"د.ل"})`, "money"])];
+const OPT_F_ = () => [["label","اسم الباقة"], ...PAYS().map(p => ["p_"+p.key, `سعر ${p.name} (${p.cur||"د.ل"})`, "money"]), ...(D.settings?.supplier?.enabled ? [["supj","ربط بمنتج المزوّد (تنفيذ تلقائي)","sup"]] : [])];
 function fieldHTML([k,l,t,opts], v){
   if (t==="sel") return `<div class="fld"><label>${l}</label><select class="inp" data-k="${k}">${opts.map(([a,b])=>`<option value="${a}" ${v===a?"selected":""}>${b}</option>`).join("")}</select></div>`;
+  if (t==="sup") { let o = null; try { o = v ? JSON.parse(v) : null; } catch {}
+    return `<div class="fld supf"><label>${l}</label><input type="hidden" data-k="${k}" value="${esc(v||"")}">
+      <div class="suprow"><span class="supname">${o ? `🔗 ${esc(o.name)} <small>(${esc(o.type==="digital"?"كود فوري":"شحن")} · تكلفة ${esc(o.cost)} ${esc(o.cur||"")})</small>` : `<small style="color:var(--dim)">غير مربوطة — تنفيذ يدوي</small>`}</span>
+      <button type="button" class="btn btn-o" onclick="supPick(this)">${o?"تغيير":"اختيار"}</button>${o?`<button type="button" class="btn btn-x" onclick="supClear(this)">فك</button>`:""}</div></div>`; }
   if (t==="color") return `<div class="fld"><label>${l}</label><input class="inp" data-k="${k}" type="color" value="${esc(v||"#2453B8")}" style="height:44px;padding:4px"></div>`;
   if (t==="multi") { const arr = Array.isArray(v) ? v : []; return `<div class="fld"><label>${l}</label><div style="display:flex;flex-wrap:wrap;gap:4px 14px">${opts.map(([a,b])=>`<label class="sw" style="margin:0"><input type="checkbox" data-k="${k}" data-mv="${a}" ${arr.includes(a)?"checked":""}> ${b}</label>`).join("")}</div></div>`; }
   if (t==="chk") return `<label class="sw"><input type="checkbox" data-k="${k}" ${v!==false?"checked":""}> ${l}</label>`;
@@ -505,7 +548,7 @@ function rowItem(id, fields, r={}, isNew){
   const tf = ROWT[id];
   if (tf) return `<details class="ri rc" ${isNew?"open":""}><summary>${tf(r)}<span class="chev">▾</span></summary><div class="rc-b">${rowBody(id, fields, r)}</div></details>`;
   return `<div class="ri">${rowBody(id, fields, r)}</div>`; }
-function rowBody(id, fields, r){ return `${fields.length>2?`<div class="g2">${fields.filter(f=>!["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>["ta","chk","multi"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
+function rowBody(id, fields, r){ return `${fields.length>2?`<div class="g2">${fields.filter(f=>!["ta","chk","multi","sup"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}</div>${fields.filter(f=>["ta","chk","multi","sup"].includes(f[2])).map(f=>fieldHTML(f,r[f[0]])).join("")}`:`<div class="g2">${fields.map(f=>fieldHTML(f,r[f[0]])).join("")}</div>`}
   <div style="display:flex;gap:6px"><button type="button" class="btn btn-o" onclick="mvRow(this,-1)">▲</button><button type="button" class="btn btn-o" onclick="mvRow(this,1)">▼</button><button type="button" class="btn btn-x" onclick="if(confirm('حذف؟'))this.closest('.ri').remove()">حذف</button></div>`; }
 function rows(id, fields, arr, titleFn){ ROWF[id]=fields; ROWT[id]=titleFn||null; return `<div class="rows-box" id="${id}">${arr.map(r=>rowItem(id,fields,r)).join("")}<button type="button" class="btn btn-o" onclick="addRow('${id}')">+ إضافة</button></div>`; }
 const ROWF = {}, ROWT = {};
@@ -525,16 +568,29 @@ const A = {
     document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { stab = b.dataset.st;
       document.querySelectorAll("[data-st]").forEach(x => x.classList.toggle("on", x===b));
       document.querySelectorAll(".spane").forEach(p => p.hidden = p.dataset.pane !== stab); });
+    $("#supTest").onclick = () => busy($("#supTest"), async () => { const r = await api("sup_balance");
+      if (r.status === 401 || r.balance === null) throw new Error("فشل الاتصال: تأكد من مفاتيح المزوّد");
+      $("#supBal").innerHTML = `رصيدك عند المزوّد: <b class="num">${Number(r.balance).toFixed(2)}</b> ${esc(r.currency)}`; toast("الاتصال شغّال ✓","s"); });
     $("#sf").onsubmit = e => { e.preventDefault(); busy($("#sB"), async () => {
     const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل" }));
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
     await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
-      push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() }, updatedAt:serverTimestamp() });
+      push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() },
+      supplier:{ enabled:$("#supEn").checked, auto:$("#supAuto").checked, sandbox:$("#supSb").checked }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 
 
+const supLinked = o => !!D.products.find(x=>x.id===o.productId)?.options?.[o.optionIndex]?.sup;
+window.supExec = (id, btn) => { if (confirm("إرسال الطلب للمزوّد للتنفيذ؟ (يتخصم من رصيدك عند المزوّد)")) busy(btn, async () => {
+  const r = await api("sup_exec", { id });
+  if (r.state === "done") toast("تم التنفيذ ✓","s"); else if (r.state === "sent") toast("أُرسل للمزوّد ✓ بانتظار التنفيذ","s"); else toast(r.err || "ما تمش التنفيذ","e"); }); };
+window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
+let lastAutoSync = 0;
+setInterval(() => { if (!auth.currentUser || !D.settings?.supplier?.enabled || !can("orders")) return;
+  if (!D.orders.some(o=>o.status==="processing"&&o.sup?.state==="sent")) return;
+  if (Date.now() - lastAutoSync < 60000) return; lastAutoSync = Date.now(); api("sup_sync").catch(()=>{}); }, 15000);
 window.oProc = id => busy(null, async () => { await updateDoc(doc(db,"orders",id), { status:"processing", updatedAt:serverTimestamp() }); toast("تم ✓","s"); });
 window.oDone = id => {
   const o = D.orders.find(x=>x.id===id);
@@ -653,11 +709,12 @@ window.pEdit = id => {
     <div class="fld"><label>الصورة (مربعة) — ارفع من الجهاز أو حط رابط</label><input class="inp" id="pf" type="file" accept="image/*"><input class="inp" id="pu" style="margin-top:6px" placeholder="أو رابط صورة https://..." dir="ltr" value="${img.startsWith("http")?esc(img):""}">
       <div id="pv">${img?`<img class="preview" style="width:110px;height:110px" src="${esc(img)}">`:""}</div>${img?`<button type="button" class="btn btn-x" style="margin-top:6px" id="pr">حذف الصورة</button>`:""}</div>
     <label class="sw"><input type="checkbox" id="pi" ${p.needsInput?"checked":""}> يحتاج إدخال من العميل (مثل ID اللاعب)</label>
+    ${D.settings?.supplier?.enabled ? `<p class="m" style="color:var(--muted);margin:-4px 2px 10px">لو الباقة مربوطة بالمزوّد ومنتجه يطلب ID أو بريد، فعّل الخانة هذي باش الزبون يكتبه.</p>` : ""}
     <div class="g2" id="piBox" ${p.needsInput?"":'style="display:none"'}><div class="fld"><label>عنوان الحقل</label><input class="inp" id="pil" value="${esc(p.inputLabel||"ID اللاعب")}"></div><div class="fld"><label>نص توضيحي</label><input class="inp" id="pih" value="${esc(p.inputHint||"")}" placeholder="مثال: 5123456789"></div></div>
     <label class="sw"><input type="checkbox" id="pa" ${p.active!==false?"checked":""}> ظاهر في الموقع</label>
     <div class="sec">الباقات والأسعار</div>
     <p class="m" style="color:var(--muted);margin:-4px 2px 8px">حط سعر لكل محفظة. اللي تخليه فاضي، الباقة ما تظهرش لأصحاب المحفظة هذي.</p>
-    ${rows("popts", OPT_F_(), (p.options||[]).map(o => { const r = { label:o.label }; PAYS().forEach(w => { const v = optPrice(o,w.key); if (v) r["p_"+w.key] = v; }); return r; }))}
+    ${rows("popts", OPT_F_(), (p.options||[]).map(o => { const r = { label:o.label, supj: o.sup ? JSON.stringify(o.sup) : "" }; PAYS().forEach(w => { const v = optPrice(o,w.key); if (v) r["p_"+w.key] = v; }); return r; }))}
     <button class="btn btn-p w" id="pB">حفظ المنتج</button>`);
   $("#pi").onchange = () => $("#piBox").style.display = $("#pi").checked ? "" : "none";
   $("#pf").onchange = async () => { const f=$("#pf").files[0]; if(!f) return; img = await fileToDataURL(f, 320, 320, .82); $("#pu").value=""; $("#pv").innerHTML=`<img class="preview" style="width:110px;height:110px" src="${img}">`; };
@@ -665,7 +722,9 @@ window.pEdit = id => {
   $("#pB").onclick = () => busy($("#pB"), async () => {
     const name = $("#pn").value.trim(); if (!name) throw new Error("اكتب اسم المنتج");
     const options = readRows("popts").filter(o=>o.label).map(r => { const prices = {};
-      PAYS().forEach(w => { const v = r["p_"+w.key]; if (v > 0) prices[w.key] = v; }); return { label:r.label, prices }; })
+      PAYS().forEach(w => { const v = r["p_"+w.key]; if (v > 0) prices[w.key] = v; });
+      let sup = null; try { sup = r.supj ? JSON.parse(r.supj) : null; } catch {}
+      return sup ? { label:r.label, prices, sup } : { label:r.label, prices }; })
       .filter(o => Object.keys(o.prices).length);
     if (!options.length) throw new Error("أضف باقة واحدة على الأقل بسعر في محفظة وحدة على الأقل");
     const url = $("#pu").value.trim(); if (url) img = url;
@@ -674,6 +733,28 @@ window.pEdit = id => {
     if (id) await updateDoc(doc(db,"products",id), data); else await addDoc(collection(db,"products"), { ...data, createdAt:serverTimestamp() });
     closeSheet(); toast("تم حفظ المنتج ✓","s");
   });
+};
+let supTarget = null;
+window.supClear = btn => { const f = btn.closest(".supf"); f.querySelector("[data-k]").value = ""; f.outerHTML = fieldHTML(["supj","ربط بمنتج المزوّد (تنفيذ تلقائي)","sup"], ""); };
+window.supPick = async btn => {
+  supTarget = btn.closest(".supf");
+  const box = document.createElement("div"); box.className = "suppick"; box.innerHTML = `<div class="suppick-in">
+    <h3>اختر منتج من المزوّد<button type="button" class="btn btn-o" id="spX">✕</button></h3>
+    <input class="inp" id="spQ" placeholder="ابحث بالاسم..." dir="auto"><div id="spL" style="margin-top:10px"><div class="empty">جاري التحميل...</div></div></div>`;
+  document.body.appendChild(box);
+  const close = () => box.remove();
+  box.querySelector("#spX").onclick = close; box.onclick = e => { if (e.target === box) close(); };
+  let list = [];
+  try { list = await loadSup(); } catch(e){ box.querySelector("#spL").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const draw = () => { const q = box.querySelector("#spQ").value.trim().toLowerCase();
+    const f = list.filter(x => !q || x.name.toLowerCase().includes(q) || x.id === q).slice(0, 80);
+    box.querySelector("#spL").innerHTML = f.map((x,i) => `<button type="button" class="card spi" data-i="${list.indexOf(x)}" style="width:100%;text-align:right;display:flex;gap:10px;align-items:center">
+      ${x.image?`<img class="thumb" src="${esc(x.image)}" alt="">`:`<div class="thumb">${esc(x.name.slice(0,8))}</div>`}
+      <span style="flex:1;min-width:0"><b class="h" style="font-size:14px">${esc(x.name)}</b><span class="m">${x.type==="digital"?"كود فوري":"شحن"} · تكلفة <b class="num">${x.price}</b> ${esc(x.cur)}${x.available?"":" · <span style='color:var(--err)'>غير متوفر</span>"}${x.label?` · يطلب: ${esc(x.label)}`:""}</span></span></button>`).join("") || `<div class="empty">ما فيش نتائج</div>`;
+    box.querySelectorAll(".spi").forEach(b => b.onclick = () => { const x = list[+b.dataset.i];
+      const v = JSON.stringify({ id:x.id, type:x.type, key:x.key, name:x.name, cost:x.price, cur:x.cur });
+      supTarget.outerHTML = fieldHTML(["supj","ربط بمنتج المزوّد (تنفيذ تلقائي)","sup"], v); close(); }); };
+  box.querySelector("#spQ").oninput = draw; draw();
 };
 window.pToggle = id => { const p=D.products.find(x=>x.id===id); busy(null, ()=>updateDoc(doc(db,"products",id), { active: p.active===false })); };
 window.pDel = id => { if (confirm("حذف المنتج نهائياً؟")) busy(null, async()=>{ await deleteDoc(doc(db,"products",id)); toast("تم الحذف","s"); }); };

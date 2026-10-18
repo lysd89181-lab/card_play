@@ -961,7 +961,7 @@ window.openOrder = id => {
   const st = STATUS[o.status]||STATUS.pending, p = S.products.find(x=>x.id===o.productId) || { name:o.productName };
   openSheet(`
     <div class="ph"><div class="oimg">${pimg(p)}</div><div><h3>${esc(o.productName)}</h3><span class="badge ${st.c}">${st.t}</span></div></div>
-    ${o.delivery ? `<div class="fld"><label>بيانات الطلب</label></div><div class="code"><div>${esc(o.delivery)}</div><button class="copy" onclick='cpCopy(${JSON.stringify(o.delivery).replace(/'/g,"&#39;")})'>${ic("copy")}</button></div>` : ""}
+    ${o.delivery ? `<div class="fld"><label>بيانات الطلب</label></div><div class="code"><div style="white-space:pre-line">${esc(o.delivery)}</div><button class="copy" onclick='cpCopy(${JSON.stringify(o.delivery).replace(/'/g,"&#39;")})'>${ic("copy")}</button></div>` : ""}
     <div class="list" style="padding:4px 14px">
       <div class="kv"><span>رقم الطلب</span><b class="num">#${esc(o.no)}</b></div>
       <div class="kv"><span>الباقة</span><b>${iso(esc(o.optionLabel||""))}</b></div>
@@ -1027,6 +1027,16 @@ function pingAdmin(type, id){
   const u = S.settings?.push?.worker; if (!u || !/^https:\/\//.test(u)) return;
   try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ type, id }), keepalive:true }).catch(()=>{}); } catch {}
 }
+
+/* supplier status refresh for this customer's orders that are waiting at the supplier */
+let supPollT = 0;
+setInterval(() => {
+  const u = S.settings?.push?.worker; if (!u || !S.user) return;
+  if (Date.now() - supPollT < 30000) return;
+  const w = S.orders.filter(o => o.status === "processing" && o.sup?.state === "sent").slice(0, 3);
+  if (!w.length) return; supPollT = Date.now();
+  w.forEach(o => { try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ action:"sup_check", id:o.id }) }).catch(()=>{}); } catch {} });
+}, 10000);
 
 /* tickets */
 async function sendTicket(e){

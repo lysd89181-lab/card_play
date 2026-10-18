@@ -1,10 +1,11 @@
 {
-  // Cloudflare Worker for Card Play admin push notifications.
+  // Cloudflare Worker for Card Play (admin notifications + supplier integration).
   // Deployed automatically by Cloudflare Workers Builds (root directory: /worker).
-  // The secret FIREBASE_SA is set in the Cloudflare dashboard, not here.
+  // Secrets set in the Cloudflare dashboard (never here): FIREBASE_SA, LP_KEY, LP_EMAIL
   "name": "cardplay-notify",
   "main": "notify.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "vars": { "FB_API_KEY": "AIzaSyARNJOPAycWU3YJdZSBN1d9uoLrvso3i4Y" }
 }

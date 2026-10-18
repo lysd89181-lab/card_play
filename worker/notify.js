@@ -1,5 +1,10 @@
-// Cloudflare Worker: sends admin push notifications for new orders / top-ups.
-// Secret required: FIREBASE_SA  (the full Firebase service-account JSON)
+// Cloudflare Worker for Card Play:
+//  - admin push notifications for new orders / top-ups
+//  - supplier (Libya Play) integration: product list, balance, automatic order execution, status sync
+// Secrets (Cloudflare dashboard): FIREBASE_SA (service-account JSON), LP_KEY (supplier api key), LP_EMAIL (supplier account email)
+// Var (wrangler.jsonc): FB_API_KEY (public web api key, used to verify admin sign-in tokens)
+
+const LP = "https://api.libyaplay.com/portal";
 let cached = { token: "", exp: 0 };
 
 export default {
@@ -7,62 +12,301 @@ export default {
     const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
     const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { ...cors, "Content-Type": "application/json" } });
     if (req.method === "OPTIONS") return new Response(null, { headers: cors });
-    if (req.method !== "POST") return json({ ok: true, service: "cardplay-notify" });
+    if (req.method !== "POST") return json({ ok: true, service: "cardplay" });
     try {
-      const { type, id } = JSON.parse(await req.text() || "{}");
-      if (!["orders", "topups"].includes(type) || !/^[A-Za-z0-9]{10,40}$/.test(id || "")) return json({ ok: false }, 400);
+      const body = JSON.parse(await req.text() || "{}");
+      const ctx = await makeCtx(env, req);
 
-      const sa = JSON.parse(env.FIREBASE_SA);
-      const at = await accessToken(sa);
-      const H = { Authorization: `Bearer ${at}`, "Content-Type": "application/json" };
-      const base = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`;
+      // ---------- public: ping after a new order / top-up ----------
+      if (!body.action) {
+        const { type, id } = body;
+        if (!["orders", "topups"].includes(type) || !validId(id)) return json({ ok: false }, 400);
+        const res = await onNew(ctx, type, id);
+        return json({ ok: true, ...res });
+      }
 
-      // 1) read the order / top-up and make sure it is new and not already notified
-      const r = await fetch(`${base}/${type}/${id}`, { headers: H });
-      if (!r.ok) return json({ ok: false }, 404);
-      const d = await r.json(), f = d.fields || {};
-      const S = k => f[k]?.stringValue ?? "";
-      const N = k => Number(f[k]?.integerValue ?? f[k]?.doubleValue ?? 0);
-      if (S("status") !== "pending" || f.notified?.booleanValue) return json({ ok: true, skip: "done" });
-      const created = Date.parse(f.createdAt?.timestampValue || d.createTime || 0);
-      if (Date.now() - created > 10 * 60 * 1000) return json({ ok: true, skip: "old" });
+      // ---------- public: customer page asks for a status refresh of one of its orders ----------
+      if (body.action === "sup_check") {
+        if (!validId(body.id)) return json({ ok: false }, 400);
+        return json({ ok: true, ...(await syncOrders(ctx, [body.id], true)) });
+      }
 
-      // 2) mark as notified (only one request can win thanks to the updateTime precondition)
-      const m = await fetch(`${base}/${type}/${id}?updateMask.fieldPaths=notified&currentDocument.updateTime=${encodeURIComponent(d.updateTime)}`,
-        { method: "PATCH", headers: H, body: JSON.stringify({ fields: { notified: { booleanValue: true } } }) });
-      if (!m.ok) return json({ ok: true, skip: "race" });
+      // ---------- admin-only ----------
+      const who = await adminFromToken(ctx, body.idToken);
+      if (!who) return json({ ok: false, error: "unauthorized" }, 401);
 
-      // 3) build the message
-      const money = (c, cur) => `${(c / 100).toFixed(2)} ${cur || "د.ل"}`;
-      const title = type === "orders" ? "🛒 طلب شراء جديد" : "💰 طلب شحن جديد";
-      const body = type === "orders"
-        ? `${S("uName")} — ${S("productName")} ${S("optionLabel")} — ${money(N("price"), S("cur"))}`
-        : `${S("uName")} — محفظة ${S("methodName")} — ${money(N("amount"), S("cur"))}`;
-      const site = (req.headers.get("Origin") || "https://cardplay.com.ly").replace(/\/+$/, "");
-
-      // 4) send to every admin device
-      const lt = await fetch(`${base}/adminTokens?pageSize=100`, { headers: H });
-      const docs = (await lt.json()).documents || [];
-      let sent = 0;
-      await Promise.all(docs.map(async td => {
-        const token = td.fields?.token?.stringValue; if (!token) return;
-        const s = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
-          method: "POST", headers: H,
-          body: JSON.stringify({ message: { token, webpush: {
-            headers: { Urgency: "high", TTL: "86400" },
-            notification: { title, body, icon: `${site}/img/icon-192.png`, badge: `${site}/img/icon-192.png`, dir: "rtl", lang: "ar", tag: (type === "orders" ? "o" : "t") + id, renotify: true },
-            fcm_options: { link: `${site}/admin.html` } } } })
-        });
-        if (s.ok) sent++;
-        else if (s.status === 404 || s.status === 400) await fetch(`https://firestore.googleapis.com/v1/${td.name}`, { method: "DELETE", headers: H }); // dead token
-      }));
-      return json({ ok: true, sent });
+      if (body.action === "sup_products") {
+        if (!who.can("products")) return json({ ok: false, error: "forbidden" }, 403);
+        return json({ ok: true, products: await supProducts(ctx) });
+      }
+      if (body.action === "sup_balance") {
+        if (!who.can("settings") && !who.can("products")) return json({ ok: false, error: "forbidden" }, 403);
+        const r = await lp(ctx, "GET", "/general/profile");
+        const d = r.data?.data || {};
+        return json({ ok: r.ok, status: r.status, balance: d.wallet ?? null, currency: d.currency_code || "", name: d.name || "" });
+      }
+      if (body.action === "sup_exec") {
+        if (!who.can("orders")) return json({ ok: false, error: "forbidden" }, 403);
+        if (!validId(body.id)) return json({ ok: false }, 400);
+        return json({ ok: true, ...(await execOrder(ctx, body.id, true)) });
+      }
+      if (body.action === "sup_sync") {
+        if (!who.can("orders")) return json({ ok: false, error: "forbidden" }, 403);
+        return json({ ok: true, ...(await syncOrders(ctx, null, false)) });
+      }
+      return json({ ok: false, error: "unknown action" }, 400);
     } catch (e) {
       return json({ ok: false, error: String(e && e.message || e) }, 500);
     }
   }
 };
 
+const validId = id => /^[A-Za-z0-9]{10,40}$/.test(id || "");
+
+/* ================= context / firestore helpers ================= */
+async function makeCtx(env, req) {
+  const sa = JSON.parse(env.FIREBASE_SA);
+  const at = await accessToken(sa);
+  return {
+    env, sa,
+    H: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+    base: `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`,
+    site: (req.headers.get("Origin") || "https://cardplay.com.ly").replace(/\/+$/, "")
+  };
+}
+async function getDoc(ctx, path) {
+  const r = await fetch(`${ctx.base}/${path}`, { headers: ctx.H });
+  if (!r.ok) return null;
+  const d = await r.json();
+  return { name: d.name, updateTime: d.updateTime, createTime: d.createTime, data: decodeFields(d.fields || {}) };
+}
+// PATCH selected top-level fields; returns true on success. precondition = updateTime string (optional)
+async function patchDoc(ctx, path, obj, precondition) {
+  const mask = Object.keys(obj).map(k => "updateMask.fieldPaths=" + encodeURIComponent(k)).join("&");
+  const pre = precondition ? `&currentDocument.updateTime=${encodeURIComponent(precondition)}` : "";
+  const r = await fetch(`${ctx.base}/${path}?${mask}${pre}`, { method: "PATCH", headers: ctx.H, body: JSON.stringify({ fields: encodeFields(obj) }) });
+  return r.ok;
+}
+function decodeValue(v) {
+  if (!v || typeof v !== "object") return null;
+  if ("stringValue" in v) return v.stringValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("doubleValue" in v) return Number(v.doubleValue);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("nullValue" in v) return null;
+  if ("mapValue" in v) return decodeFields(v.mapValue.fields || {});
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(decodeValue);
+  return null;
+}
+function decodeFields(f) { const o = {}; for (const k in f) o[k] = decodeValue(f[k]); return o; }
+function encodeValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === "string") return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encodeValue) } };
+  return { mapValue: { fields: encodeFields(v) } };
+}
+function encodeFields(o) { const f = {}; for (const k in o) f[k] = encodeValue(o[k]); return f; }
+
+/* ================= admin auth ================= */
+async function adminFromToken(ctx, idToken) {
+  if (!idToken || !ctx.env.FB_API_KEY) return null;
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${ctx.env.FB_API_KEY}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken }) });
+  if (!r.ok) return null;
+  const uid = (await r.json()).users?.[0]?.localId;
+  if (!uid) return null;
+  const a = await getDoc(ctx, `admins/${uid}`);
+  if (!a) return null;
+  const owner = a.data.role !== "staff";
+  const perms = Array.isArray(a.data.perms) ? a.data.perms : ["orders", "topups", "tickets"];
+  return { uid, owner, can: p => owner || perms.includes(p) };
+}
+
+/* ================= supplier API ================= */
+async function lp(ctx, method, path, { query, form, json } = {}) {
+  const url = new URL(LP + path);
+  if (query) for (const k in query) if (query[k] !== undefined && query[k] !== "") url.searchParams.set(k, query[k]);
+  const headers = { "x-api-key": ctx.env.LP_KEY || "", "x-email": ctx.env.LP_EMAIL || "", Accept: "application/json" };
+  let body;
+  if (form) { headers["Content-Type"] = "application/x-www-form-urlencoded"; body = new URLSearchParams(form).toString(); }
+  if (json) { headers["Content-Type"] = "application/json"; body = JSON.stringify(json); }
+  const r = await fetch(url, { method, headers, body });
+  let data = null; const txt = await r.text();
+  try { data = JSON.parse(txt); } catch { data = { raw: txt.slice(0, 300) }; }
+  return { ok: r.ok, status: r.status, data };
+}
+const lpMsg = (r) => {
+  const m = r.data?.message || r.data?.error || r.data?.msg || (r.data?.errors && JSON.stringify(r.data.errors)) || "";
+  if (r.status === 400) return "رصيد المزوّد غير كافي";
+  if (r.status === 401) return "مفاتيح المزوّد غير صحيحة";
+  if (r.status === 422) return "المنتج غير موجود عند المزوّد أو بيانات ناقصة" + (m ? ` (${String(m).slice(0, 120)})` : "");
+  return `خطأ من المزوّد (${r.status})` + (m ? `: ${String(m).slice(0, 120)}` : "");
+};
+
+async function supProducts(ctx) {
+  const r = await lp(ctx, "GET", "/digital-products/show-products");
+  const arr = Array.isArray(r.data) ? r.data : (Array.isArray(r.data?.data) ? r.data.data : []);
+  return arr.map(p => {
+    const fields = p.params || p.likecard_option_feilds || [];
+    const req = fields.find(f => String(f.required) === "1") || fields[0];
+    return {
+      id: String(p.id), name: p.name || "", image: p.image || p.photo || "",
+      price: Number(p.selling_price ?? p.price ?? p.final_price ?? 0), cur: p.currency_sign || p.currency_code || "",
+      type: p.pro_type === "digt" ? "digital" : "social",
+      key: req?.key || "", label: req?.label || "", available: p.available !== false
+    };
+  });
+}
+
+/* ================= new order / top-up ================= */
+async function onNew(ctx, type, id) {
+  const doc = await getDoc(ctx, `${type}/${id}`);
+  if (!doc) return { skip: "missing" };
+  const d = doc.data;
+  if (d.status !== "pending" || d.notified) return { skip: "done" };
+  const created = Date.parse(d.createdAt || doc.createTime || 0);
+  if (Date.now() - created > 10 * 60 * 1000) return { skip: "old" };
+  if (!(await patchDoc(ctx, `${type}/${id}`, { notified: true }, doc.updateTime))) return { skip: "race" };
+
+  let sent = 0, exec = null;
+  if (type === "orders") {
+    const st = await getDoc(ctx, "settings/app");
+    if (st?.data?.supplier?.enabled && st.data.supplier.auto) exec = await execOrder(ctx, id, false, st.data.supplier);
+  }
+  // push to admins (the order title reflects the supplier result when it ran)
+  const money = (c, cur) => `${(Number(c || 0) / 100).toFixed(2)} ${cur || "د.ل"}`;
+  let title = type === "orders" ? "🛒 طلب شراء جديد" : "💰 طلب شحن جديد";
+  if (exec?.state === "done") title = "✅ طلب نُفّذ تلقائياً";
+  else if (exec?.state === "sent") title = "⏳ طلب أُرسل للمزوّد";
+  else if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
+  const body = type === "orders"
+    ? `${d.uName || ""} — ${d.productName || ""} ${d.optionLabel || ""} — ${money(d.price, d.cur)}${exec?.state === "failed" ? " — " + exec.err : ""}`
+    : `${d.uName || ""} — محفظة ${d.methodName || ""} — ${money(d.amount, d.cur)}`;
+  sent = await pushAll(ctx, title, body, (type === "orders" ? "o" : "t") + id);
+  return { sent, exec };
+}
+
+async function pushAll(ctx, title, body, tag) {
+  const lt = await fetch(`${ctx.base}/adminTokens?pageSize=100`, { headers: ctx.H });
+  const docs = (await lt.json()).documents || [];
+  let sent = 0;
+  await Promise.all(docs.map(async td => {
+    const token = td.fields?.token?.stringValue; if (!token) return;
+    const s = await fetch(`https://fcm.googleapis.com/v1/projects/${ctx.sa.project_id}/messages:send`, {
+      method: "POST", headers: ctx.H,
+      body: JSON.stringify({ message: { token, webpush: {
+        headers: { Urgency: "high", TTL: "86400" },
+        notification: { title, body, icon: `${ctx.site}/img/icon-192.png`, badge: `${ctx.site}/img/icon-192.png`, dir: "rtl", lang: "ar", tag, renotify: true },
+        fcm_options: { link: `${ctx.site}/admin.html` } } } })
+    });
+    if (s.ok) sent++;
+    else if (s.status === 404 || s.status === 400) await fetch(`https://firestore.googleapis.com/v1/${td.name}`, { method: "DELETE", headers: ctx.H });
+  }));
+  return sent;
+}
+
+/* ================= execute an order at the supplier ================= */
+async function execOrder(ctx, id, manual, supSettings) {
+  const path = `orders/${id}`;
+  const doc = await getDoc(ctx, path);
+  if (!doc) return { state: "skip", err: "الطلب غير موجود" };
+  const o = doc.data;
+  if (o.status !== "pending") return { state: "skip", err: "الطلب مش قيد التنفيذ" };
+  if (o.sup && ["sending", "sent", "done"].includes(o.sup.state)) return { state: "skip", err: "الطلب أُرسل للمزوّد قبل" };
+
+  const sup = supSettings || (await getDoc(ctx, "settings/app"))?.data?.supplier || {};
+  if (!sup.enabled) return { state: "skip", err: "ربط المزوّد غير مفعّل" };
+  const prod = await getDoc(ctx, `products/${o.productId}`);
+  const opt = prod?.data?.options?.[o.optionIndex];
+  const link = opt?.sup;
+  if (!link?.id) return { state: "skip", err: "الباقة مش مربوطة بمنتج عند المزوّد" };
+
+  // lock the order so nothing executes it twice
+  const uuid = crypto.randomUUID();
+  if (!(await patchDoc(ctx, path, { sup: { state: "sending", id: link.id, type: link.type || "", uuid, at: new Date() } }, doc.updateTime)))
+    return { state: "skip", err: "الطلب قيد المعالجة" };
+
+  const input = String(o.input || "");
+  const sandbox = !!sup.sandbox;
+  let r;
+  if (link.type === "digital") {
+    const form = { productID: link.id };
+    if (sandbox) form.env = "sandbox";
+    if (input && link.key) { form["optionalFields[0][key]"] = link.key; form["optionalFields[0][value]"] = input; }
+    r = await lp(ctx, "POST", "/digital-products/payment", { form });
+    const d = r.data?.data;
+    if (r.ok && r.data?.status !== false && d && (d.secretNumber || d.serialNumber)) {
+      const lines = [d.secretNumber && `${d.secretNumber}`, d.serialNumber && `Serial: ${d.serialNumber}`, d.exp_date && `Exp: ${d.exp_date}`].filter(Boolean);
+      await patchDoc(ctx, path, { status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, at: new Date() }, updatedAt: new Date() });
+      return { state: "done" };
+    }
+  } else {
+    const params = {};
+    if (link.key) params[link.key] = input;
+    const payload = { product_id: link.id, qty: 1, params, order_uuid: uuid };
+    if (sandbox) payload.env = "sandbox";
+    r = await lp(ctx, "POST", "/social/pay", { json: payload });
+    const d = r.data?.data;
+    if (r.ok && r.data?.status !== false && d) {
+      const ref = String(d.order_id ?? d.id ?? "");
+      await patchDoc(ctx, path, { status: "processing", sup: { state: "sent", id: link.id, type: "social", uuid, ref, ext: String(d.external_id ?? ""), at: new Date() }, updatedAt: new Date() });
+      return { state: "sent" };
+    }
+  }
+  const err = lpMsg(r);
+  await patchDoc(ctx, path, { sup: { state: "failed", id: link.id, type: link.type || "", uuid, err, at: new Date() } });
+  return { state: "failed", err };
+}
+
+/* ================= sync social orders that are waiting at the supplier ================= */
+const OK_ST = ["accept", "accepted", "complete", "completed", "done", "success", "successful", "delivered"];
+const BAD_ST = ["reject", "rejected", "cancel", "canceled", "cancelled", "fail", "failed", "refund", "refunded", "error"];
+async function syncOrders(ctx, ids, rateLimit) {
+  let orders = [];
+  if (ids) {
+    for (const id of ids) { const d = await getDoc(ctx, `orders/${id}`); if (d) orders.push({ id, ...d }); }
+  } else {
+    const q = await fetch(`${ctx.base}:runQuery`, { method: "POST", headers: ctx.H, body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: "orders" }], where: { fieldFilter: { field: { fieldPath: "status" }, op: "EQUAL", value: { stringValue: "processing" } } }, limit: 60 } }) });
+    const rows = await q.json();
+    orders = (Array.isArray(rows) ? rows : []).filter(x => x.document).map(x => ({ id: x.document.name.split("/").pop(), updateTime: x.document.updateTime, data: decodeFields(x.document.fields || {}) }));
+  }
+  orders = orders.filter(o => o.data.status === "processing" && o.data.sup?.state === "sent");
+  if (rateLimit) orders = orders.filter(o => Date.now() - Date.parse(o.data.sup.checkedAt || 0) > 20000);
+  if (!orders.length) return { checked: 0, updated: 0 };
+
+  // pull recent supplier orders (with delivery codes)
+  const seen = new Map();
+  const add = (x) => { if (!x) return; for (const k of [x.id, x.catalog_order_id, x.order_id, x.order_uuid, x.external_id]) if (k !== undefined && k !== null && k !== "") seen.set(String(k), x); };
+  const a = await lp(ctx, "GET", "/social/order-and-status");
+  (Array.isArray(a.data?.data) ? a.data.data : []).forEach(add);
+  const b = await lp(ctx, "GET", "/social/orders", { query: { per_page: 100 } });
+  (Array.isArray(b.data?.data?.data) ? b.data.data.data : []).forEach(x => { const k = String(x.id); if (!seen.has(k)) add(x); });
+
+  let updated = 0;
+  for (const o of orders) {
+    const s = o.data.sup;
+    const m = [s.ref, s.uuid, s.ext].map(String).map(k => seen.get(k)).find(Boolean);
+    const st = String(m?.status || "").toLowerCase();
+    const path = `orders/${o.id}`;
+    if (m && OK_ST.includes(st)) {
+      await patchDoc(ctx, path, { status: "done", delivery: String(m.delivery_data || m.code || "تم التنفيذ ✓"), sup: { ...s, state: "done", checkedAt: new Date() }, updatedAt: new Date() });
+      updated++;
+    } else if (m && BAD_ST.includes(st)) {
+      await patchDoc(ctx, path, { sup: { ...s, state: "failed", err: "المزوّد رفض الطلب — ألغه من اللوحة لإرجاع المبلغ للزبون", checkedAt: new Date() } });
+      updated++;
+    } else {
+      await patchDoc(ctx, path, { sup: { ...s, checkedAt: new Date() } });
+    }
+  }
+  return { checked: orders.length, updated };
+}
+
+/* ================= google service-account token ================= */
 async function accessToken(sa) {
   if (cached.token && Date.now() < cached.exp) return cached.token;
   const now = Math.floor(Date.now() / 1000);
@@ -80,7 +324,7 @@ async function accessToken(sa) {
     body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + unsigned + "." + b64url(new Uint8Array(sig))
   });
   const j = await r.json();
-  if (!j.access_token) throw new Error("auth failed: " + JSON.stringify(j));
+  if (!j.access_token) throw new Error("auth failed");
   cached = { token: j.access_token, exp: Date.now() + 50 * 60 * 1000 };
   return j.access_token;
 }
