@@ -977,6 +977,7 @@ window.openProduct = id => {
     btn.innerHTML = ok ? `${ic("cart")} تأكيد الشراء` : `${ic("plus")} اشحن محفظة ${esc(W(wk).name)}`;
     btn.onclick = ok ? () => buy(p, sel, wk) : () => { closeSheet(); setTimeout(()=>openTopup(wk),350); };
   };
+  if (opts.length === 1) { document.querySelector("#pOpts .opt")?.click(); return; }
   upd();
 };
 async function buy(p, i, wk){

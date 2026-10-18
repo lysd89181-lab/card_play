@@ -37,7 +37,12 @@ export default {
 
       if (body.action === "sup_products") {
         if (!who.can("products")) return json({ ok: false, error: "forbidden" }, 403);
-        return json({ ok: true, products: await supProducts(ctx) });
+        const tree = await supTree(ctx);
+        return json({ ok: true, products: flattenTree(tree) });
+      }
+      if (body.action === "sup_tree") {
+        if (!who.can("products")) return json({ ok: false, error: "forbidden" }, 403);
+        return json({ ok: true, tree: await supTree(ctx) });
       }
       if (body.action === "sup_balance") {
         if (!who.can("settings") && !who.can("products")) return json({ ok: false, error: "forbidden" }, 403);
@@ -147,19 +152,39 @@ const lpMsg = (r) => {
   return `خطأ من المزوّد (${r.status})` + (m ? `: ${String(m).slice(0, 120)}` : "");
 };
 
-async function supProducts(ctx) {
-  const r = await lp(ctx, "GET", "/digital-products/show-products");
+// full catalogue as a tree: root categories -> sub categories -> products (digital codes + masar top-ups)
+function normProduct(p) {
+  const fields = Array.isArray(p.params) ? p.params : (Array.isArray(p.likecard_option_feilds) ? p.likecard_option_feilds : []);
+  let key = "", label = "";
+  const obj = fields.find(f => f && typeof f === "object" && f.key && String(f.required ?? "1") === "1") || fields.find(f => f && typeof f === "object" && f.key);
+  if (obj) { key = obj.key; label = obj.label || obj.name || obj.hint || ""; }
+  else if (fields.length && typeof fields[0] === "string") { key = p.validation_field || "player_id"; label = fields[0]; }
+  const digital = p.pro_type === "digt" || (!!p.likecard_option_feilds && !p.params);
+  const ptype = String(p.product_type || "").toLowerCase();
+  return {
+    id: String(p.id), name: p.name || "", image: p.image || p.photo || "",
+    price: Number(p.selling_price ?? p.final_price ?? p.price ?? 0), cur: p.currency_sign || p.currency_code || "",
+    type: digital ? "digital" : "social", key, label,
+    amount: !digital && (ptype === "amount" || !!(p.qty_values && p.qty_values.min && Number(p.qty_values.min) > 1)),
+    available: p.available !== false
+  };
+}
+async function supTree(ctx) {
+  const r = await lp(ctx, "GET", "/digital-products/clone");
   const arr = Array.isArray(r.data) ? r.data : (Array.isArray(r.data?.data) ? r.data.data : []);
-  return arr.map(p => {
-    const fields = p.params || p.likecard_option_feilds || [];
-    const req = fields.find(f => String(f.required) === "1") || fields[0];
-    return {
-      id: String(p.id), name: p.name || "", image: p.image || p.photo || "",
-      price: Number(p.selling_price ?? p.price ?? p.final_price ?? 0), cur: p.currency_sign || p.currency_code || "",
-      type: p.pro_type === "digt" ? "digital" : "social",
-      key: req?.key || "", label: req?.label || "", available: p.available !== false
-    };
-  });
+  return arr.map(c => ({
+    id: String(c.id), name: c.name || "", image: c.image || c.photo || "",
+    products: (c.products || []).map(normProduct),
+    subs: (c.subCategories || c.sub_categories || []).map(sc => ({
+      id: String(sc.id), name: sc.name || "", image: sc.image || sc.photo || "",
+      products: (sc.products || []).map(normProduct)
+    })).filter(sc => sc.products.length)
+  })).filter(c => c.products.length || c.subs.length);
+}
+function flattenTree(tree) {
+  const out = [];
+  tree.forEach(c => { c.products.forEach(p => out.push(p)); c.subs.forEach(sc => sc.products.forEach(p => out.push(p))); });
+  return out;
 }
 
 /* ================= new order / top-up ================= */

@@ -66,6 +66,9 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .suppick{position:fixed;inset:0;z-index:60;background:rgba(0,4,14,.75);display:flex;align-items:flex-end;justify-content:center}
 .suppick-in{width:100%;max-width:640px;max-height:88vh;overflow:auto;background:linear-gradient(180deg,#0C1A38,#070F22);border:1px solid var(--line2);border-radius:22px 22px 0 0;padding:16px}
 .suppick-in h3{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.crumb{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:700}
+.crumb button{color:var(--blue2);font-weight:800}
+.suppick-in .folder{margin-bottom:8px}
 .newch{display:flex;flex-direction:column;gap:10px}
 .newch .card{text-align:right;width:100%;margin:0}
 .newch .card .m{display:block;margin-top:4px}
@@ -785,62 +788,131 @@ window.pNew = () => {
       <button class="card" ${supOn?"":"disabled style='opacity:.5'"} onclick="closeSheet();setTimeout(()=>supImport(),250)"><b class="h">⚡ جلب من المزوّد</b><span class="m">${supOn?"تختار منتجات المزوّد، يتجيب الاسم والصورة والباقات، وتحط نسبة الربح. التنفيذ تلقائي.":"فعّل ربط المزوّد من الإعدادات ← المزوّد أولاً."}</span></button>
     </div>`);
 };
+const SUPT = { tree:null };
+async function loadTree(force){ if (SUPT.tree && !force) return SUPT.tree; SUPT.tree = (await api("sup_tree")).tree || []; return SUPT.tree; }
+const existingSupIds = () => new Set(D.products.flatMap(p => (p.options||[]).map(o => o.sup?.id).filter(Boolean)));
 window.supImport = async () => {
   const box = document.createElement("div"); box.className = "suppick";
-  box.innerHTML = `<div class="suppick-in"><h3>جلب من المزوّد<button type="button" class="btn btn-o" id="siX">✕</button></h3>
-    <p class="m" style="color:var(--muted);margin-bottom:8px">اختار الباقات اللي تبيها تكون في منتج واحد (مثلاً كل باقات شدات ببجي).</p>
-    <input class="inp" id="siQ" placeholder="ابحث بالاسم... (مثلاً PUBG)" dir="auto">
-    <div id="siL" style="margin-top:10px"><div class="empty">جاري التحميل...</div></div>
+  box.innerHTML = `<div class="suppick-in"><h3><span id="siT">جلب من المزوّد</span><button type="button" class="btn btn-o" id="siX">✕</button></h3>
+    <div id="siCrumb" class="crumb"></div>
+    <input class="inp" id="siQ" placeholder="ابحث في كل منتجات المزوّد..." dir="auto">
+    <div id="siL" style="margin-top:10px"><div class="empty">جاري تحميل أقسام المزوّد...</div></div>
     <div class="savebar"><button type="button" class="btn btn-p w" id="siNext" disabled>التالي</button></div></div>`;
   document.body.appendChild(box);
   const close = () => box.remove();
   box.querySelector("#siX").onclick = close;
-  let list = []; const picked = new Map();
-  try { list = await loadSup(); } catch(e){ box.querySelector("#siL").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  let tree = [];
+  try { tree = await loadTree(); } catch(e){ box.querySelector("#siL").innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const have = existingSupIds();
+  const picked = new Map();             // supplier product id -> { p, root, sub }
+  let path = [];                         // [rootId] or [rootId, subId]
+  const all = []; tree.forEach(c => { c.products.forEach(p => all.push({ p, root:c, sub:null })); c.subs.forEach(sc => sc.products.forEach(p => all.push({ p, root:c, sub:sc }))); });
+  const okItem = x => x.p.available && !x.p.amount && !have.has(x.p.id);
+  const thumb = (img, name) => img ? `<img class="thumb" src="${esc(img)}" alt="" loading="lazy">` : `<div class="thumb">${esc((name||"").slice(0,8))}</div>`;
+  const prodRow = x => { const dis = !okItem(x);
+    const why = have.has(x.p.id) ? "مضاف عندك" : !x.p.available ? "غير متوفر" : x.p.amount ? "بالكمية — غير مدعوم" : "";
+    return `<label class="card spi" style="display:flex;gap:10px;align-items:center;${dis?"opacity:.5":"cursor:pointer"}">
+      <input type="checkbox" data-id="${esc(x.p.id)}" ${picked.has(x.p.id)?"checked":""} ${dis?"disabled":""} style="width:20px;height:20px;accent-color:var(--blue)">
+      ${thumb(x.p.image, x.p.name)}
+      <span style="flex:1;min-width:0"><b class="h" style="font-size:14px">${esc(x.p.name)}</b>
+      <span class="m">${x.p.type==="digital"?"🎟️ كود":"⚡ شحن"}${x.p.label?` · يطلب: ${esc(x.p.label)}`:""} · تكلفة <b class="num">${x.p.price}</b> ${esc(x.p.cur)}${why?` · <span style="color:var(--warn)">${why}</span>`:""}</span></span></label>`; };
+  const folderRow = (id, name, img, n, sub) => `<button type="button" class="card spi folder" data-go="${esc(id)}" style="width:100%;text-align:right;display:flex;gap:10px;align-items:center">
+      ${thumb(img, name)}<span style="flex:1"><b class="h" style="font-size:14.5px">📁 ${esc(name)}</b><span class="m">${n} منتج${sub?` · ${sub} أقسام فرعية`:""}</span></span><span style="color:var(--muted)">‹</span></button>`;
   const draw = () => {
     const q = box.querySelector("#siQ").value.trim().toLowerCase();
-    const f = list.filter(x => !q || x.name.toLowerCase().includes(q)).slice(0, 120);
-    box.querySelector("#siL").innerHTML = f.map(x => `<label class="card spi" style="display:flex;gap:10px;align-items:center;cursor:pointer">
-      <input type="checkbox" data-id="${esc(x.id)}" ${picked.has(x.id)?"checked":""} style="width:20px;height:20px;accent-color:var(--blue)">
-      ${x.image?`<img class="thumb" src="${esc(x.image)}" alt="">`:`<div class="thumb">${esc(x.name.slice(0,8))}</div>`}
-      <span style="flex:1;min-width:0"><b class="h" style="font-size:14px">${esc(x.name)}</b><span class="m">${x.type==="digital"?"كود فوري":"شحن"} · تكلفة <b class="num">${x.price}</b> ${esc(x.cur)}${x.available?"":" · <span style='color:var(--err)'>غير متوفر</span>"}</span></span></label>`).join("") || `<div class="empty">ما فيش نتائج</div>`;
-    box.querySelectorAll("[data-id]").forEach(cb => cb.onchange = () => { const x = list.find(y=>y.id===cb.dataset.id); cb.checked ? picked.set(x.id, x) : picked.delete(x.id); upd(); });
+    const L = box.querySelector("#siL"), C = box.querySelector("#siCrumb");
+    let rows = [], scope = [];
+    if (q) { scope = all.filter(x => x.p.name.toLowerCase().includes(q)).slice(0, 150); rows = scope.map(x => prodRow(x)); C.innerHTML = `نتائج البحث`; }
+    else if (!path.length) {
+      C.innerHTML = `كل الأقسام`;
+      rows = tree.map(c => folderRow(c.id, c.name, c.image, c.products.length + c.subs.reduce((a,b)=>a+b.products.length,0), c.subs.length));
+    } else {
+      const c = tree.find(x=>x.id===path[0]); const sc = path[1] ? c.subs.find(x=>x.id===path[1]) : null;
+      C.innerHTML = `<button type="button" data-crumb="0">كل الأقسام</button> › ${sc ? `<button type="button" data-crumb="1">${esc(c.name)}</button> › ${esc(sc.name)}` : esc(c.name)}`;
+      if (!sc) rows.push(...c.subs.map(x => folderRow(x.id, x.name, x.image, x.products.length, 0)));
+      scope = (sc ? sc.products.map(p=>({ p, root:c, sub:sc })) : c.products.map(p=>({ p, root:c, sub:null })));
+      if (!sc) scope = scope.concat(c.subs.flatMap(x => x.products.map(p=>({ p, root:c, sub:x }))));
+      const direct = sc ? scope : scope.filter(x=>!x.sub);
+      const selectable = scope.filter(okItem);
+      if (selectable.length) rows.unshift(`<button type="button" class="btn btn-o w" id="siAll" style="margin-bottom:10px">${selectable.every(x=>picked.has(x.p.id))?"إلغاء تحديد الكل":`تحديد الكل هنا (${selectable.length})`}</button>`);
+      rows.push(...direct.map(prodRow));
+    }
+    L.innerHTML = rows.join("") || `<div class="empty">ما فيش نتائج</div>`;
+    L.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { path = path.length ? [path[0], b.dataset.go] : [b.dataset.go]; draw(); L.scrollTop = 0; box.querySelector(".suppick-in").scrollTop = 0; });
+    C.querySelectorAll("[data-crumb]").forEach(b => b.onclick = () => { path = path.slice(0, +b.dataset.crumb); draw(); });
+    L.querySelectorAll("[data-id]").forEach(cb => cb.onchange = () => { const x = all.find(y=>y.p.id===cb.dataset.id); cb.checked ? picked.set(x.p.id, x) : picked.delete(x.p.id); upd(); });
+    const sa = L.querySelector("#siAll"); if (sa) sa.onclick = () => { const sel = scope.filter(okItem); const allOn = sel.every(x=>picked.has(x.p.id)); sel.forEach(x => allOn ? picked.delete(x.p.id) : picked.set(x.p.id, x)); draw(); upd(); };
   };
-  const upd = () => { const b = box.querySelector("#siNext"); b.disabled = !picked.size; b.textContent = picked.size ? `التالي (${picked.size} باقات)` : "التالي"; };
-  box.querySelector("#siQ").oninput = draw; draw();
+  const upd = () => { const b = box.querySelector("#siNext"); b.disabled = !picked.size; b.textContent = picked.size ? `التالي (${picked.size} منتج)` : "اختار منتجات"; };
+  box.querySelector("#siQ").oninput = draw; draw(); upd();
   box.querySelector("#siNext").onclick = () => { const items = [...picked.values()]; close(); supImportStep2(items); };
 };
 const lsGetJ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 function supImportStep2(items){
   const saved = lsGetJ("cp_margins", {});
   const usdRate = saved.__usd || 7;
-  openSheet(`<h3>نسبة الربح<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
-    <p class="m" style="color:var(--muted);margin-bottom:10px">الأسعار تتحسب من تكلفة المزوّد + نسبة الربح لكل محفظة. تقدر تعدّل أي سعر بعدين.</p>
+  openSheet(`<h3>إعدادات الجلب (${items.length} منتج)<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="sec" style="margin-top:0">الأقسام</div>
+    <div class="box2">
+      <label class="sw"><input type="checkbox" id="mkCats" ${saved.__mk===false?"":"checked"}> إنشاء الأقسام بنفس أسماء وصور المزوّد</label>
+      <div class="fld" style="margin:0"><label>حطها داخل</label><select class="inp" id="dstCat">${catOptions("").replace("— بدون قسم (يظهر في الرئيسية) —","— الرئيسية مباشرة —")}</select></div>
+    </div>
+    <div class="sec">طريقة الإضافة</div>
+    <div class="box2">
+      <label class="sw"><input type="radio" name="mode" value="sep" ${saved.__mode==="merge"?"":"checked"}> كل منتج لحاله (زي المزوّد)</label>
+      <label class="sw" style="margin:0"><input type="radio" name="mode" value="merge" ${saved.__mode==="merge"?"checked":""}> دمج منتجات كل قسم في منتج واحد بباقات</label>
+    </div>
+    <div class="sec">نسبة الربح</div>
     <div class="box2">${PAYS().filter(w=>w.enabled!==false).map(w => `<div class="g2" style="align-items:end"><div class="fld"><label>ربح ${esc(w.name)} %</label><input class="inp num" data-m="${esc(w.key)}" type="number" step="0.1" value="${saved[w.key] ?? 10}"></div>
-      ${(w.cur||"")==="$" ? `<div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>` : `<label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label>`}</div>`).join("")}</div>
-    <div class="fld" style="margin-top:10px"><label>تقريب السعر</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div>
-    <button class="btn btn-p w" id="m2">التالي: مراجعة المنتج</button>`);
+      ${(w.cur||"")==="$" ? `<div class="fld"><label>سعر الدولار (د.ل)</label><input class="inp num" id="usdR" type="number" step="0.01" value="${usdRate}"></div>` : `<label class="sw" style="margin-bottom:14px"><input type="checkbox" data-off="${esc(w.key)}" ${saved["off_"+w.key]?"checked":""}> ما يتباعش بهذي المحفظة</label>`}</div>`).join("")}
+      <div class="fld" style="margin:0"><label>تقريب السعر</label><select class="inp" id="rnd"><option value="1">بدون تقريب</option><option value="25">لأقرب ربع دينار</option><option value="50">لأقرب نص دينار</option><option value="100">لأقرب دينار</option></select></div></div>
+    <button class="btn btn-p w" id="m2" style="margin-top:12px">جلب وإضافة</button>`);
   $("#rnd").value = String(saved.__rnd || 1);
-  $("#m2").onclick = () => {
+  $("#m2").onclick = () => busy($("#m2"), async () => {
     const m = {}, off = {}; document.querySelectorAll("[data-m]").forEach(i => m[i.dataset.m] = parseFloat(i.value)||0);
     document.querySelectorAll("[data-off]").forEach(i => off[i.dataset.off] = i.checked);
     const usd = parseFloat($("#usdR")?.value) || usdRate, rnd = +$("#rnd").value || 1;
-    const keep = { ...m, __usd: usd, __rnd: rnd }; Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
+    const mk = $("#mkCats").checked, mode = document.querySelector("[name=mode]:checked").value, dst = $("#dstCat").value;
+    const keep = { ...m, __usd: usd, __rnd: rnd, __mk: mk, __mode: mode }; Object.keys(off).forEach(k => keep["off_"+k] = off[k]);
     try { localStorage.setItem("cp_margins", JSON.stringify(keep)); } catch {}
     const round = c => rnd > 1 ? Math.ceil(c / rnd) * rnd : Math.round(c);
-    const first = items[0];
-    const needKey = items.find(x => x.key);
-    const draft = {
-      name: first.name.replace(/\s*\d[\d,.]*\s*(UC|uc|شدة|شدات|جوهرة|\$)?\s*$/,"").trim() || first.name,
-      image: first.image || "", category:"games", active:true, sort: D.products.length+1,
-      needsInput: !!needKey, inputLabel: needKey?.label || "", inputHint:"",
-      options: items.map(x => { const prices = {};
-        PAYS().filter(w=>w.enabled!==false && !off[w.key]).forEach(w => { const base = x.price * (1 + (m[w.key]||0)/100);
-          prices[w.key] = (w.cur||"")==="$" ? Math.round(base / usd * 100) : round(Math.round(base * 100)); });
-        return { label: x.name, prices, sup: { id:x.id, type:x.type, key:x.key, name:x.name, cost:x.price, cur:x.cur } }; })
+    const pricesFor = x => { const prices = {};
+      PAYS().filter(w=>w.enabled!==false && !off[w.key]).forEach(w => { const base = x.p.price * (1 + (m[w.key]||0)/100);
+        prices[w.key] = (w.cur||"")==="$" ? Math.round(base / usd * 100) : round(Math.round(base * 100)); });
+      return prices; };
+    const optOf = x => ({ label: x.p.name, prices: pricesFor(x), sup: { id:x.p.id, type:x.p.type, key:x.p.key, name:x.p.name, cost:x.p.price, cur:x.p.cur } });
+
+    // categories (reuse ones created by an earlier import)
+    const ops = []; const catId = {};
+    const findCat = ref => D.cats.find(c => c.supRef === ref)?.id;
+    let sortN = D.cats.length + 1;
+    const ensureCat = (ref, name, image, parent) => {
+      if (catId[ref]) return catId[ref];
+      const ex = findCat(ref); if (ex) return catId[ref] = ex;
+      const r = doc(collection(db,"categories")); catId[ref] = r.id;
+      ops.push(b => b.set(r, { name, image: image||"", parent: parent||"", desc:"", sort: sortN++, active:true, supRef: ref, updatedAt: serverTimestamp() }));
+      return r.id;
     };
-    closeSheet(); setTimeout(() => { pEdit(null, draft); toast("راجع الاسم والقسم والأسعار واضغط حفظ","s"); }, 250);
-  };
+    const catFor = x => {
+      if (!mk) return dst;
+      const rootC = ensureCat("r:"+x.root.id, x.root.name, x.root.image, dst);
+      return x.sub ? ensureCat("s:"+x.root.id+"/"+x.sub.id, x.sub.name, x.sub.image || x.root.image, rootC) : rootC;
+    };
+    let sortP = D.products.length + 1, nP = 0;
+    const addProduct = data => { const r = doc(collection(db,"products")); nP++; ops.push(b => b.set(r, { ...data, sort: sortP++, active:true, category:"games", description:"", createdAt: serverTimestamp(), updatedAt: serverTimestamp() })); };
+    if (mode === "sep") {
+      items.forEach(x => addProduct({ name: x.p.name, image: x.p.image || x.sub?.image || x.root.image || "", catId: catFor(x),
+        needsInput: !!x.p.key, inputLabel: x.p.label || "", inputHint: "", options: [optOf(x)] }));
+    } else {
+      const groups = new Map();
+      items.forEach(x => { const g = x.sub ? "s"+x.root.id+"/"+x.sub.id : "r"+x.root.id; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x); });
+      groups.forEach(list => { const x0 = list[0], grp = x0.sub || x0.root; const needKey = list.find(x=>x.p.key);
+        const cat = mk ? (x0.sub ? ensureCat("r:"+x0.root.id, x0.root.name, x0.root.image, dst) : dst) : dst;
+        addProduct({ name: grp.name, image: grp.image || x0.p.image || "", catId: cat, needsInput: !!needKey, inputLabel: needKey?.p.label || "", inputHint: "", options: list.map(optOf) }); });
+    }
+    for (let k = 0; k < ops.length; k += 400) { const b = writeBatch(db); ops.slice(k, k+400).forEach(f => f(b)); await b.commit(); }
+    closeSheet(); toast(`تمت إضافة ${nP} منتج ✓`, "s"); tab = "products"; draw();
+  });
 }
 window.cEdit = (id, parent) => {
   const c = id ? D.cats.find(x=>x.id===id) : { active:true, parent: parent||"", sort: D.cats.length+1 };
