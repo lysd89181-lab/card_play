@@ -267,11 +267,20 @@ async function execOrder(ctx, id, manual, supSettings) {
     r = await lp(ctx, "POST", "/digital-products/payment", { json: payload });
     const d = r.data?.data;
     if (r.ok && r.data?.status !== false && d && (sandbox || fake(d.secretNumber))) return await testDone("digital");
-    if (r.ok && r.data?.status !== false && d && (d.secretNumber || d.serialNumber)) {
-      const codes = Array.isArray(d.items) && d.items.length ? d.items : [d];
-      const lines = codes.flatMap(c => [c.secretNumber && `${c.secretNumber}`, c.serialNumber && `Serial: ${c.serialNumber}`, c.exp_date && `Exp: ${c.exp_date}`]).filter(Boolean);
-      await patchDoc(ctx, path, { status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, at: new Date() }, updatedAt: new Date() });
-      return { state: "done" };
+    if (r.ok && r.data?.status !== false && d) {
+      // some products return only an order reference ("order-<id>") and deliver the code later
+      const isRef = v => /^order[-_]/i.test(String(v || "").trim());
+      const refOf = v => String(v || "").trim().replace(/^order[-_]/i, "");
+      const codes = (Array.isArray(d.items) && d.items.length ? d.items : [d]).filter(c => c && c.secretNumber && !isRef(c.secretNumber));
+      const ref = String(d.order_id ?? "") || [d.serialNumber, d.secretNumber].filter(isRef).map(refOf)[0] || "";
+      if (codes.length) {
+        const lines = codes.flatMap(c => [`${c.secretNumber}`, c.serialNumber && !isRef(c.serialNumber) && c.serialNumber !== c.secretNumber && `Serial: ${c.serialNumber}`, c.exp_date && `Exp: ${c.exp_date}`]).filter(Boolean);
+        await patchDoc(ctx, path, { status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, ref, at: new Date() }, updatedAt: new Date() });
+        return { state: "done" };
+      }
+      // accepted but code not ready yet -> wait and sync later
+      await patchDoc(ctx, path, { status: "processing", sup: { state: "sent", id: link.id, type: "digital", uuid, ref, at: new Date() }, updatedAt: new Date() });
+      return { state: "sent" };
     }
   } else {
     const params = {};
@@ -312,23 +321,26 @@ async function syncOrders(ctx, ids, rateLimit) {
 
   // pull recent supplier orders (with delivery codes)
   const seen = new Map();
-  const add = (x) => { if (!x) return; for (const k of [x.id, x.catalog_order_id, x.order_id, x.order_uuid, x.external_id]) if (k !== undefined && k !== null && k !== "") seen.set(String(k), x); };
+  const norm = k => String(k).trim().toLowerCase().replace(/^order[-_]/, "");
+  const add = (x) => { if (!x) return; for (const k of [x.id, x.catalog_order_id, x.order_id, x.order_uuid, x.external_id]) if (k !== undefined && k !== null && k !== "") seen.set(norm(k), x); };
   const a = await lp(ctx, "GET", "/social/order-and-status");
   (Array.isArray(a.data?.data) ? a.data.data : []).forEach(add);
   const b = await lp(ctx, "GET", "/social/orders", { query: { per_page: 100 } });
-  (Array.isArray(b.data?.data?.data) ? b.data.data.data : []).forEach(x => { const k = String(x.id); if (!seen.has(k)) add(x); });
+  (Array.isArray(b.data?.data?.data) ? b.data.data.data : []).forEach(x => { if (!seen.has(norm(x.id))) add(x); });
 
   let updated = 0;
   for (const o of orders) {
     const s = o.data.sup;
-    const m = [s.ref, s.uuid, s.ext].map(String).map(k => seen.get(k)).find(Boolean);
+    const m = [s.ref, s.uuid, s.ext].filter(Boolean).map(norm).map(k => seen.get(k)).find(Boolean);
     const st = String(m?.status || "").toLowerCase();
     const path = `orders/${o.id}`;
     if (m && OK_ST.includes(st) && /^[xX*\-\s]+$/.test(String(m.delivery_data || ""))) {
       await patchDoc(ctx, path, { sup: { ...s, state: "failed", err: "المزوّد رجّع كود تجريبي — راجع الطلب", checkedAt: new Date() } });
       updated++;
+    } else if (m && OK_ST.includes(st) && s.type === "digital" && !deliveryText(m)) {
+      await patchDoc(ctx, path, { sup: { ...s, checkedAt: new Date() } });   // accepted but code not visible yet
     } else if (m && OK_ST.includes(st)) {
-      await patchDoc(ctx, path, { status: "done", delivery: String(m.delivery_data || m.code || "تم التنفيذ ✓"), sup: { ...s, state: "done", checkedAt: new Date() }, updatedAt: new Date() });
+      await patchDoc(ctx, path, { status: "done", delivery: deliveryText(m) || "تم التنفيذ ✓", sup: { ...s, state: "done", checkedAt: new Date() }, updatedAt: new Date() });
       updated++;
     } else if (m && BAD_ST.includes(st)) {
       await patchDoc(ctx, path, { sup: { ...s, state: "failed", err: "المزوّد رفض الطلب — ألغه من اللوحة لإرجاع المبلغ للزبون", checkedAt: new Date() } });
@@ -338,6 +350,16 @@ async function syncOrders(ctx, ids, rateLimit) {
     }
   }
   return { checked: orders.length, updated };
+}
+
+// delivery_data may be a string, an object with codes, or a list
+function deliveryText(m) {
+  const v = m.delivery_data ?? m.code ?? m.codes ?? null;
+  if (!v) return "";
+  const one = c => typeof c === "string" ? c : [c.secretNumber || c.code || c.pin, c.serialNumber && `Serial: ${c.serialNumber}`, (c.exp_date || c.expiry) && `Exp: ${c.exp_date || c.expiry}`].filter(Boolean).join("\n");
+  let t = Array.isArray(v) ? v.map(one).join("\n") : typeof v === "object" ? one(v) : String(v);
+  if (typeof v === "string") { try { const j = JSON.parse(v); if (j && typeof j === "object") t = Array.isArray(j) ? j.map(one).join("\n") : one(j); } catch {} }
+  return /^order[-_]/i.test(t.trim()) ? "" : t.trim();
 }
 
 /* ================= google service-account token ================= */

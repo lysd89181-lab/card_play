@@ -405,6 +405,7 @@ orders(){
       ${o.input?`<div class="kv"><span>البيانات:</span><b class="num">${esc(o.input)}</b>${cpb(o.input)}</div>`:""}
       <div class="kv"><span>السعر:</span><b>${money(o.price, o.cur)}</b>${o.wallet?` <span class="m">(${esc(WN(o.wallet))})</span>`:""}</div>
       ${o.delivery?`<div class="kv"><span>المُسلَّم:</span><b style="white-space:pre-line">${esc(o.delivery)}</b></div>`:""}
+      ${o.sup?.ref?`<div class="kv"><span>رقم عند المزوّد:</span><b class="num" style="font-size:12px">${esc(o.sup.ref)}</b>${cpb(o.sup.ref)}</div>`:""}
       ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":o.sup.state==="test"?`<span style="color:var(--warn)">${esc(o.sup.err||"🧪 تجربة")}</span>`:`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>`:""}
       <div class="acts">
         ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed" || o.sup.state==="test") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
