@@ -139,7 +139,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .dots i{width:6px;height:6px;border-radius:6px;background:rgba(255,255,255,.45);transition:.3s}
 .dots i.on{width:18px;background:var(--blue)}
 
-.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 18px}
+.cats{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:8px;margin:12px 0 18px}
 @media (max-width:899px){ .cat{font-size:13px;padding:12px 4px} }
 .cat{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 6px;border-radius:16px;background:var(--card);border:1px solid var(--line);font-weight:700;font-size:14px;transition:.2s}
 .cat svg{width:28px;height:28px;color:var(--blue2);filter:drop-shadow(0 0 8px rgba(30,123,255,.6))}
@@ -512,13 +512,15 @@ function busy(btn, on, label){ if(!btn) return; if(on){ btn.dataset.l=btn.innerH
 const lsGet = k => { try{ return localStorage.getItem(k); }catch{ return null; } };
 const lsSet = (k,v) => { try{ localStorage.setItem(k,v); }catch{} };
 
-const CATS = [
-  { key:"all",   name:"الكل",     icon:"grid" },
-  { key:"games", name:"ألعاب",    icon:"game" },
-  { key:"cards", name:"بطاقات",   icon:"card" },
-  { key:"subs",  name:"اشتراكات", icon:"star" },
-  { key:"apps",  name:"تطبيقات",  icon:"apps" }
+const DEF_TYPES = [
+  { key:"games", name:"ألعاب",       icon:"game" },
+  { key:"cards", name:"كروت وهدايا", icon:"card" },
+  { key:"local", name:"كروت محلية",  icon:"sim"  },
+  { key:"subs",  name:"اشتراكات",    icon:"star" },
+  { key:"apps",  name:"تطبيقات",     icon:"apps" }
 ];
+const TYPES = () => (Array.isArray(S?.settings?.types) && S.settings.types.length ? S.settings.types : DEF_TYPES).filter(t => t && t.key && t.hidden !== true);
+const typeName = k => (TYPES().find(t=>t.key===k) || {}).name || "";
 const STATUS = {
   pending:   { t:"قيد التنفيذ", c:"b-pend" },
   processing:{ t:"جاري التنفيذ", c:"b-proc" },
@@ -730,7 +732,7 @@ const priceTag = p => { const k = defW(), m = minPrice(p, k);
 const pcardHTML = p => `<button class="pcard" onclick="openProduct('${p.id}')">${pimg(p)}<div class="meta"><div class="nm">${esc(p.name)}</div>${priceTag(p)}</div></button>`;
 const subCats = pid => S.cats.filter(c => (c.parent||"") === (pid||""));
 const catAlive = id => { const seen = new Set(); let c = S.cats.find(x=>x.id===id); while (c) { if (seen.has(c.id)) return false; seen.add(c.id); if (!c.parent) return true; c = S.cats.find(x=>x.id===c.parent); } return false; };
-const catHasContent = id => S.products.some(p=>p.catId===id) || subCats(id).some(c=>catHasContent(c.id));
+const catHasContent = (id, type) => S.products.some(p=>p.catId===id && (!type || p.category===type)) || subCats(id).some(c=>catHasContent(c.id, type));
 const ccardHTML = c => `<a class="ccard" href="#c-${c.id}">${c.image?`<img src="${esc(c.image)}" alt="" loading="lazy">`:`<div class="cph">${ic("grid")}</div>`}<span>${esc(c.name)}</span></a>`;
 const balChip = () => { const k = defW(); return `<button class="bal-chip" onclick="openWSwitch()"><small>محفظة ${esc(W(k).name)} ▾</small><b>${money(wbal(k), curOf(k))}</b></button>`; };
 
@@ -738,10 +740,11 @@ const balChip = () => { const k = defW(); return `<button class="bal-chip" oncli
 const VIEWS = {
 home(){
   const q = S.q.trim().toLowerCase();
-  const filtering = !!q || S.cat!=="all";
-  let list = S.products.filter(p => (S.cat==="all" || p.category===S.cat) && (!q || (p.name||"").toLowerCase().includes(q)) && (filtering || !p.catId || !catAlive(p.catId)));
-  const tops = filtering ? [] : subCats("").filter(c => catHasContent(c.id));
-  const limited = !S.showAll && !q && S.cat==="all" ? list.slice(0,9) : list;
+  const filtering = !!q;
+  const tf = S.cat !== "all" ? S.cat : null;
+  let list = S.products.filter(p => (!tf || p.category===tf) && (!q || (p.name||"").toLowerCase().includes(q)) && (filtering || !p.catId || !catAlive(p.catId)));
+  const tops = filtering ? [] : subCats("").filter(c => catHasContent(c.id, tf));
+  const limited = !S.showAll && !q ? list.slice(0,12) : list;
   const bannersArr = S.banners.length ? S.banners : [{ _def:true }];
   return `
   <div class="topbar">
@@ -754,10 +757,10 @@ home(){
     <div class="b-slide" style="background-image:url('${esc(b.image||"")}')"><div class="b-txt">${b.title?`<h3>${esc(b.title)}</h3>`:""}${b.subtitle?`<p>${esc(b.subtitle)}</p>`:""}${b.cta?`<button class="cta" data-blink="${esc(b.link||"")}">${esc(b.cta)}</button>`:""}</div></div>`).join("")}
   </div><div class="dots" id="bDots">${bannersArr.length>1 ? bannersArr.map((_,i)=>`<i class="${i?"":"on"}"></i>`).join("") : ""}</div></div>
   <div class="home-side"><label class="search">${ic("search")}<input id="q" data-keep placeholder="ابحث عن بطاقة أو لعبة..." value="${esc(S.q)}" autocomplete="off"></label>
-  <div class="cats">${CATS.slice(1).map(c => `<button class="cat ${S.cat===c.key?"on":""}" onclick="pickCat('${c.key}')">${ic(c.icon)}${c.name}</button>`).join("")}</div></div></div>
-  ${tops.length ? `<div class="sec-h"><h2>الأقسام</h2></div><div class="cgrid">${tops.map(ccardHTML).join("")}</div>` : ""}
-  ${!filtering && tops.length && !list.length ? "" : `<div class="sec-h"><h2>${S.cat==="all" ? (q ? "نتائج البحث" : (tops.length ? "منتجات أخرى" : "أحدث المنتجات")) : CATS.find(c=>c.key===S.cat).name}</h2>
-    ${S.cat!=="all" ? `<button onclick="pickCat('all')">عرض الكل</button>` : (list.length>9 && !q ? `<button onclick="toggleAll()">${S.showAll?"عرض أقل":"عرض الكل"}</button>` : "")}</div>
+  <div class="cats">${TYPES().map(c => `<button class="cat ${S.cat===c.key?"on":""}" onclick="pickCat('${c.key}')">${ic(c.icon)}${c.name}</button>`).join("")}</div></div></div>
+  ${tops.length ? `<div class="sec-h"><h2>${tf ? esc(typeName(tf)) : "الأقسام"}</h2>${tf?`<button onclick="pickCat('all')">عرض الكل</button>`:""}</div><div class="cgrid">${tops.map(ccardHTML).join("")}</div>` : ""}
+  ${!filtering && tops.length && !list.length ? "" : `<div class="sec-h"><h2>${q ? "نتائج البحث" : (tops.length ? "منتجات أخرى" : (tf ? (typeName(tf) || "المنتجات") : "أحدث المنتجات"))}</h2>
+    ${(list.length>12 && !q ? `<button onclick="toggleAll()">${S.showAll?"عرض أقل":"عرض الكل"}</button>` : "")}</div>
   ${!S.ready.products ? `<div class="grid">${Array(6).fill('<div class="pcard"><div class="pph skel"></div><div class="meta"><div class="nm skel" style="height:12px;border-radius:6px"></div></div></div>').join("")}</div>`
     : limited.length ? `<div class="grid">${limited.map(pcardHTML).join("")}</div>`
     : `<div class="empty">${ic("search")}<div>${q ? "ما في نتائج لبحثك" : "لا توجد منتجات حالياً"}</div></div>`}`}`;
@@ -886,7 +889,7 @@ window.logout = async () => { if (confirm("تسجيل الخروج من حساب
 function bannerGo(l){
   if (!l) return;
   if (/^https?:\/\//.test(l)) return window.open(l, "_blank");
-  if (CATS.some(c=>c.key===l)) return pickCat(l);
+  if (TYPES().some(c=>c.key===l)) return pickCat(l);
   if (S.products.some(p=>p.id===l)) return openProduct(l);
 }
 

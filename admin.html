@@ -72,6 +72,11 @@ header small{display:block;font-size:12px;color:var(--muted);font-weight:600}
 .newch{display:flex;flex-direction:column;gap:10px}
 .newch .card{text-align:right;width:100%;margin:0}
 .newch .card .m{display:block;margin-top:4px}
+.pfilter{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:10px}
+.bulkbar{position:sticky;top:52px;z-index:4;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px;margin-bottom:10px;border-radius:14px;background:rgba(14,33,72,.97);border:1px solid var(--blue);box-shadow:var(--glow)}
+.bulkbar b{margin-inline-end:auto}
+.card.sel{border-color:var(--blue);background:rgba(30,123,255,.1)}
+.psel{width:22px;height:22px;accent-color:var(--blue);flex-shrink:0;align-self:center}
 .perms{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
 .wrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .wchip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:9px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
@@ -205,7 +210,11 @@ const closeSheet = () => { openUser = null; $("#sh").classList.remove("on"); $("
 window.closeSheet = closeSheet; $("#sbg").onclick = closeSheet;
 const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch(e){ console.error(e); toast(e.message && e.message.length<70 && !/FirebaseError|permission/i.test(e.message) ? e.message : "حدث خطأ في قاعدة البيانات","e"); } if (btn) btn.disabled = false; };
 
-const CATS = { games:"ألعاب", cards:"بطاقات", subs:"اشتراكات", apps:"تطبيقات" };
+const DEF_TYPES = [
+  { key:"games", name:"ألعاب", icon:"game" }, { key:"cards", name:"كروت وهدايا", icon:"card" },
+  { key:"local", name:"كروت محلية", icon:"sim" }, { key:"subs", name:"اشتراكات", icon:"star" }, { key:"apps", name:"تطبيقات", icon:"apps" }];
+const TYPES = () => (Array.isArray(D.settings?.types) && D.settings.types.length ? D.settings.types : DEF_TYPES).filter(t => t && t.key);
+const CATS = new Proxy({}, { get: (_, k) => (TYPES().find(t=>t.key===k)||{}).name, ownKeys: () => TYPES().map(t=>t.key), getOwnPropertyDescriptor: (_, k) => ({ enumerable:true, configurable:true, value:(TYPES().find(t=>t.key===k)||{}).name }) });
 const STATUS = { pending:["قيد التنفيذ","b-pend"], processing:["جاري التنفيذ","b-proc"], done:["مكتمل","b-done"], cancelled:["ملغي","b-canc"] };
 
 /* image → small data URL */
@@ -228,7 +237,8 @@ $("#gB").onclick = async () => { const p=new GoogleAuthProvider(); try{ await si
 $("#out").onclick = $("#out2").onclick = () => signOut(auth);
 
 const D = { cats:[], staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
-let stab = "wallets", stq = "";
+let stab = "wallets", stq = "", pq = "", pcf = "", ptf = "";
+const selP = new Set();
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
@@ -431,15 +441,30 @@ topups(){
   </div>`).join("") : `<div class="empty">لا توجد طلبات شحن</div>`}`;
 },
 products(){
-  const list = [...D.products].sort((a,b)=>(a.sort??999)-(b.sort??999));
-  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
-  ${list.length ? list.map(p => `<div class="card"><div class="top">${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
+  const inCat = (p, cid) => { if (cid === "__none") return !p.catId || !D.cats.some(c=>c.id===p.catId); if (!cid) return true; let c = D.cats.find(x=>x.id===p.catId); const seen = new Set(); while (c && !seen.has(c.id)) { if (c.id===cid) return true; seen.add(c.id); c = D.cats.find(x=>x.id===c.parent); } return false; };
+  const q = pq.trim().toLowerCase();
+  const list = [...D.products].sort((a,b)=>(a.sort??999)-(b.sort??999))
+    .filter(p => inCat(p, pcf) && (!ptf || p.category===ptf) && (!q || (p.name||"").toLowerCase().includes(q)));
+  [...selP].forEach(id => { if (!D.products.some(p=>p.id===id)) selP.delete(id); });
+  const allSel = list.length && list.every(p=>selP.has(p.id));
+  const bar = `<div class="pfilter">
+    <input class="inp" id="pq" placeholder="ابحث في المنتجات..." value="${esc(pq)}" dir="auto">
+    <div class="g2" style="margin-top:8px"><select class="inp" id="pcf"><option value="">كل الأقسام</option><option value="__none" ${pcf==="__none"?"selected":""}>بدون قسم</option>${catTree().map(({c,depth}) => `<option value="${c.id}" ${pcf===c.id?"selected":""}>${"— ".repeat(depth)}${esc(c.name)}</option>`).join("")}</select>
+    <select class="inp" id="ptf"><option value="">كل التصنيفات</option>${TYPES().map(t=>`<option value="${t.key}" ${ptf===t.key?"selected":""}>${esc(t.name)}</option>`).join("")}</select></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><label class="sw" style="margin:0"><input type="checkbox" id="pAll" ${allSel?"checked":""}> تحديد الكل (${list.length})</label><span class="m" style="color:var(--muted)">${selP.size ? `محدد: <b>${selP.size}</b>` : ""}</span></div></div>
+  ${selP.size ? `<div class="bulkbar"><b>${selP.size} محدد</b>
+    <button class="btn btn-p" onclick="bulkMove()">📁 نقل لقسم</button><button class="btn btn-o" onclick="bulkType()">🏷️ تغيير التصنيف</button>
+    <button class="btn btn-o" onclick="bulkVis(false)">إخفاء</button><button class="btn btn-o" onclick="bulkVis(true)">إظهار</button>
+    <button class="btn btn-x" onclick="bulkDel()">حذف</button><button class="btn btn-o" onclick="selP.clear();draw()">إلغاء التحديد</button></div>` : ""}`;
+  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
+  ${D.products.length ? bar : ""}
+  ${list.length ? list.map(p => `<div class="card ${selP.has(p.id)?"sel":""}"><div class="top"><input type="checkbox" class="psel" data-p="${p.id}" ${selP.has(p.id)?"checked":""}>${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
     ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن.${(p.options||[]).some(o=>o.sup?.id) ? " استعمل «إعادة تسعير منتجات المزوّد»" : " اضغط تعديل وحط الأسعار"}</div>` : ""}
     <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
-  : `<div class="empty">لا توجد منتجات. أضف منتج أو اضغط "إضافة بيانات تجريبية".</div>`}`;
+  : `<div class="empty">${D.products.length ? "ما فيش منتجات بالفلتر هذا" : "لا توجد منتجات. أضف منتج أو اضغط \"إضافة بيانات تجريبية\"."}</div>`}`;
 },
 banners(){
   const list = [...D.banners].sort((a,b)=>(a.sort??999)-(b.sort??999));
@@ -503,13 +528,18 @@ tickets(){
 settings(){
   const s = D.settings || {};
   const pays = PAYS();
-  const ST = [["wallets","المحافظ والدفع"],["channels","القنوات"],["supplier","المزوّد"],["support","الدعم والأسئلة"],["keys","المفاتيح"]];
+  const ST = [["wallets","المحافظ والدفع"],["types","التصنيفات"],["channels","القنوات"],["supplier","المزوّد"],["support","الدعم والأسئلة"],["keys","المفاتيح"]];
   return `<form id="sf">
   <div class="chips stabs">${ST.map(([k,t])=>`<button type="button" class="${stab===k?"on":""}" data-st="${k}">${t}</button>`).join("")}</div>
 
   <div class="spane" data-pane="wallets" ${stab==="wallets"?"":"hidden"}>
     <p class="m" style="color:var(--muted);margin:0 2px 10px">كل طريقة دفع لها محفظة مستقلة برصيدها. اضغط على أي محفظة باش تفتح إعداداتها. أسعار كل محفظة تتحط في المنتج نفسه.</p>
     ${rows("pays", PAY_F, pays, r => `<span class="dot" style="background:${esc(r.color||"#2453B8")}"></span>${esc(r.name||"محفظة جديدة")}<small>${esc(r.cur||"")}${r.enabled===false?" · موقوفة":""}</small>`)}
+  </div>
+
+  <div class="spane" data-pane="types" ${stab==="types"?"":"hidden"}>
+    <p class="m" style="color:var(--muted);margin:0 2px 10px">التصنيفات اللي تظهر في الرئيسية (ألعاب، كروت وهدايا...). غيّر الاسم والأيقونة والترتيب، أو زيد تصنيف جديد. لما الزبون يضغط على تصنيف، تطلعله الأقسام اللي فيها منتجات من التصنيف هذا.</p>
+    ${rows("types", TYPE_F, TYPES(), r => `${esc(r.name||"تصنيف جديد")}`)}
   </div>
 
   <div class="spane" data-pane="channels" ${stab==="channels"?"":"hidden"}>
@@ -553,11 +583,13 @@ const PAY_F = [["key","النوع","sel",[["libyana","ليبيانا"],["almadar
   ["fields","الحقول المطلوبة عند الشحن (المبلغ دايماً موجود)","multi",[["sender","الرقم المحوَّل منه"],["account","رقم الحساب المحوَّل منه"],["name","اسم المحوِّل"],["txid","رقم العملية TxID"],["shot","صورة الإيصال (سكرين)"]]],
   ["extra","حقول إضافية — اكتب كل حقل في سطر (اختياري)","ta"],["enabled","مفعّل","chk"]];
 const CH_F = [["type","النوع","sel",[["telegram","تيليجرام"],["whatsapp","واتساب"],["instagram","انستقرام"],["facebook","فيسبوك"],["tiktok","تيك توك"],["link","رابط"]]],["title","العنوان"],["handle","اليوزر / الوصف"],["url","الرابط"],["btn","نص الزر (اختياري)"]];
+const TYPE_F = [["name","الاسم"],["icon","الأيقونة","sel",[["game","🎮 ألعاب"],["card","💳 كروت"],["sim","📱 شريحة/محلي"],["star","☁️ اشتراكات"],["apps","📲 تطبيقات"],["grid","▦ عام"],["cart","🛒 تسوق"],["wallet","👛 محفظة"]]],["key","","hidden"]];
 const FAQ_F = [["q","السؤال"],["a","الجواب","ta"]];
 const optPrice = (o, k) => Number(o?.prices && (k in o.prices) ? o.prices[k] : (o?.price || 0)) || 0;
 const OPT_F_ = () => [["label","اسم الباقة"], ...PAYS().map(p => ["p_"+p.key, `سعر ${p.name} (${p.cur||"د.ل"})`, "money"]), ...(D.settings?.supplier?.enabled ? [["supj","ربط بمنتج المزوّد (تنفيذ تلقائي)","sup"]] : [])];
 function fieldHTML([k,l,t,opts], v){
   if (t==="sel") return `<div class="fld"><label>${l}</label><select class="inp" data-k="${k}">${opts.map(([a,b])=>`<option value="${a}" ${v===a?"selected":""}>${b}</option>`).join("")}</select></div>`;
+  if (t==="hidden") return `<input type="hidden" data-k="${k}" value="${esc(v||"")}">`;
   if (t==="sup") { let o = null; try { o = v ? JSON.parse(v) : null; } catch {}
     return `<div class="fld supf"><label>${l}</label><input type="hidden" data-k="${k}" value="${esc(v||"")}">
       <div class="suprow"><span class="supname">${o ? `🔗 ${esc(o.name)} <small>(${esc(o.type==="digital"?"رقمي":"شحن مباشر")} · تكلفة ${esc(o.cost)} ${esc(o.cur||"")})</small>` : `<small style="color:var(--dim)">غير مربوطة — تنفيذ يدوي</small>`}</span>
@@ -589,6 +621,13 @@ function readRows(id){
 /* ================= actions ================= */
 const A = {
   users(){ const i=$("#uq"); i.oninput = () => { uq=i.value; draw(); }; },
+  products(){
+    const pqI = $("#pq"); if (pqI) pqI.oninput = () => { pq = pqI.value; draw(); };
+    if ($("#pcf")) $("#pcf").onchange = e => { pcf = e.target.value; draw(); };
+    if ($("#ptf")) $("#ptf").onchange = e => { ptf = e.target.value; draw(); };
+    document.querySelectorAll(".psel").forEach(cb => cb.onchange = () => { cb.checked ? selP.add(cb.dataset.p) : selP.delete(cb.dataset.p); draw(); });
+    if ($("#pAll")) $("#pAll").onchange = e => { document.querySelectorAll(".psel").forEach(cb => e.target.checked ? selP.add(cb.dataset.p) : selP.delete(cb.dataset.p)); draw(); };
+  },
   staff(){ const i=$("#stq"); if (i) i.oninput = () => { stq=i.value; draw(); }; },
   settings(){
     document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { stab = b.dataset.st;
@@ -601,7 +640,9 @@ const A = {
     const payments = readRows("pays").filter(p=>p.name).map(p=>({ ...p, cur:p.cur||"د.ل" }));
     const keys = payments.map(p=>p.key); if (new Set(keys).size !== keys.length) throw new Error("في نوعين محفظة مكررين، كل نوع مرة وحدة");
     const channels = readRows("chs").filter(c=>c.title), faq = readRows("faq").filter(f=>f.q);
-    await setDoc(doc(db,"settings","app"), { payments, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
+    const types = readRows("types").filter(t=>t.name).map(t => ({ key: t.key || ("t" + Date.now().toString(36) + Math.random().toString(36).slice(2,5)), name: t.name, icon: t.icon || "grid" }));
+    if (!types.length) throw new Error("لازم تصنيف واحد على الأقل");
+    await setDoc(doc(db,"settings","app"), { payments, types, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
       push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() },
       supplier:{ enabled:$("#supEn").checked, auto:$("#supAuto").checked, sandbox:$("#supSb").checked }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
@@ -730,7 +771,7 @@ window.pEdit = (id, draft) => {
   openSheet(`<h3>${id?"تعديل منتج":"منتج جديد"}<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <div class="fld"><label>اسم المنتج</label><input class="inp" id="pn" value="${esc(p.name||"")}" placeholder="مثال: PUBG UC"></div>
     <div class="fld"><label>القسم</label><select class="inp" id="pcat">${catOptions(p.catId||"")}</select></div>
-    <div class="g2"><div class="fld"><label>التصنيف (فلتر الرئيسية)</label><select class="inp" id="pc">${Object.entries(CATS).map(([k,v])=>`<option value="${k}" ${p.category===k?"selected":""}>${v}</option>`).join("")}</select></div>
+    <div class="g2"><div class="fld"><label>التصنيف (فلتر الرئيسية)</label><select class="inp" id="pc">${TYPES().map(t=>`<option value="${t.key}" ${p.category===t.key?"selected":""}>${esc(t.name)}</option>`).join("")}</select></div>
     <div class="fld"><label>الترتيب</label><input class="inp num" id="ps" type="number" value="${esc(p.sort??"")}"></div></div>
     <div class="fld"><label>وصف (اختياري)</label><textarea class="inp" id="pd" style="min-height:60px">${esc(p.description||"")}</textarea></div>
     <div class="fld"><label>الصورة (مربعة) — ارفع من الجهاز أو حط رابط</label><input class="inp" id="pf" type="file" accept="image/*"><input class="inp" id="pu" style="margin-top:6px" placeholder="أو رابط صورة https://..." dir="ltr" value="${img.startsWith("http")?esc(img):""}">
@@ -993,6 +1034,22 @@ window.cDel = id => {
   if (!confirm(n ? `القسم فيه ${n} منتجات، حيرجعوا يظهروا في الرئيسية. حذف القسم؟` : "حذف القسم؟")) return;
   busy(null, async () => { const b = writeBatch(db); D.products.filter(p=>p.catId===id).forEach(p => b.update(doc(db,"products",p.id), { catId:"" })); b.delete(doc(db,"categories",id)); await b.commit(); toast("تم الحذف","s"); });
 };
+async function bulkWrite(fn){ const ids = [...selP]; for (let k = 0; k < ids.length; k += 400) { const b = writeBatch(db); ids.slice(k, k+400).forEach(id => fn(b, doc(db,"products",id))); await b.commit(); } return ids.length; }
+window.bulkMove = () => {
+  openSheet(`<h3>نقل ${selP.size} منتج لقسم<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="fld"><label>القسم الجديد</label><select class="inp" id="bmC">${catOptions("")}</select></div>
+    <button class="btn btn-p w" id="bmB">نقل</button>`);
+  $("#bmB").onclick = () => busy($("#bmB"), async () => { const c = $("#bmC").value; const n = await bulkWrite((b, r) => b.update(r, { catId:c, updatedAt:serverTimestamp() })); selP.clear(); closeSheet(); toast(`تم نقل ${n} منتج ✓`,"s"); });
+};
+window.bulkType = () => {
+  openSheet(`<h3>تغيير تصنيف ${selP.size} منتج<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="fld"><label>التصنيف</label><select class="inp" id="btT">${TYPES().map(t=>`<option value="${t.key}">${esc(t.name)}</option>`).join("")}</select></div>
+    <button class="btn btn-p w" id="btB">تطبيق</button>`);
+  $("#btB").onclick = () => busy($("#btB"), async () => { const t = $("#btT").value; const n = await bulkWrite((b, r) => b.update(r, { category:t, updatedAt:serverTimestamp() })); selP.clear(); closeSheet(); toast(`تم تحديث ${n} منتج ✓`,"s"); });
+};
+window.bulkVis = on => busy(null, async () => { const n = await bulkWrite((b, r) => b.update(r, { active:on, updatedAt:serverTimestamp() })); selP.clear(); toast(`تم ${on?"إظهار":"إخفاء"} ${n} منتج ✓`,"s"); });
+window.bulkDel = () => { if (!confirm(`حذف ${selP.size} منتج نهائياً؟`)) return; busy(null, async () => { const n = await bulkWrite((b, r) => b.delete(r)); selP.clear(); toast(`تم حذف ${n} منتج`,"s"); }); };
+window.selP = selP;
 window.pToggle = id => { const p=D.products.find(x=>x.id===id); busy(null, ()=>updateDoc(doc(db,"products",id), { active: p.active===false })); };
 window.pDel = id => { if (confirm("حذف المنتج نهائياً؟")) busy(null, async()=>{ await deleteDoc(doc(db,"products",id)); toast("تم الحذف","s"); }); };
 
@@ -1000,7 +1057,7 @@ window.pDel = id => { if (confirm("حذف المنتج نهائياً؟")) busy(
 window.bEdit = id => {
   const b = id ? D.banners.find(x=>x.id===id) : { active:true, sort:D.banners.length+1, cta:"اكتشف المزيد" };
   let img = b.image || "";
-  const linkOpts = [["","بدون"],...Object.entries(CATS).map(([k,v])=>[k,"قسم: "+v]),...D.products.map(p=>[p.id,"منتج: "+p.name])];
+  const linkOpts = [["","بدون"],...TYPES().map(t=>[t.key,"تصنيف: "+t.name]),...D.products.map(p=>[p.id,"منتج: "+p.name])];
   const isUrl = /^https?:/.test(b.link||"");
   openSheet(`<h3>${id?"تعديل بانر":"بانر جديد"}<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <div class="fld"><label>الصورة (عرضية 2:1)</label><input class="inp" id="bf" type="file" accept="image/*"><div id="bv">${img?`<img class="preview" src="${esc(img)}">`:""}</div></div>
