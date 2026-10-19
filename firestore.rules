@@ -44,6 +44,7 @@ service cloud.firestore {
     match /banners/{id}  { allow read: if true; allow write: if can('banners'); }
     match /products/{id} { allow read: if true; allow write: if can('products'); }
     match /categories/{id} { allow read: if true; allow write: if can('products'); }
+    match /catalog/{id} { allow read: if true; allow write: if can('products'); }
 
     match /users/{uid} {
       allow read: if me(uid) || isAdmin();

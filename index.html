@@ -685,8 +685,23 @@ onAuthStateChanged(auth, async u => {
   if (!location.hash) location.hash = "#home"; else render();
 });
 // public data
-onSnapshot(collection(db,"products"), s => { S.products = s.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); S.ready.products=true; render(); }, ()=>{ S.ready.products=true; render(); });
-onSnapshot(collection(db,"categories"), s => { S.cats = s.docs.map(d=>({id:d.id,...d.data()})).filter(c=>c.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
+// catalog bundle: all products + sections packed in a few documents (keeps daily reads tiny)
+let legacyOn = false;
+function legacyCatalog(){
+  if (legacyOn) return; legacyOn = true;
+  onSnapshot(collection(db,"products"), s => { S.products = s.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); S.ready.products=true; render(); }, ()=>{ S.ready.products=true; render(); });
+  onSnapshot(collection(db,"categories"), s => { S.cats = s.docs.map(d=>({id:d.id,...d.data()})).filter(c=>c.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
+}
+onSnapshot(collection(db,"catalog"), s => {
+  const docs = s.docs.map(d=>({ id:d.id, ...d.data() }));
+  const head = docs.find(d=>d.id==="c0");
+  if (!head || !head.n) return legacyCatalog();
+  const parts = docs.filter(d => /^c\d+$/.test(d.id) && d.ver === head.ver).sort((a,b)=>+a.id.slice(1) - +b.id.slice(1));
+  if (parts.length < head.n) return;                      // a rebuild is in progress; keep what we have
+  S.products = parts.flatMap(d => d.items || []).sort((a,b)=>(a.sort??999)-(b.sort??999));
+  S.cats = (head.cats || []).sort((a,b)=>(a.sort??999)-(b.sort??999));
+  S.ready.products = true; render();
+}, () => legacyCatalog());
 onSnapshot(collection(db,"banners"), s => { S.banners = s.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
 onSnapshot(doc(db,"settings","app"), s => { S.settings = set(s.exists()? s.data() : {}); render(); }, ()=>{});
 
@@ -1008,7 +1023,7 @@ async function buy(p, i, wk){
     });
     pingAdmin("orders", oref.id);
     closeSheet(); toast("تم استلام طلبك ✓ سيتم تنفيذه قريباً","s"); S.otab="all"; location.hash="#orders";
-  } catch (e) { console.error(e); toast(e.message?.length<60 && !/permission|FirebaseError/i.test(e.message) ? e.message : "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
+  } catch (e) { console.error(e); toast(/quota|exhausted/i.test(e.message||e.code||"") ? "الموقع عليه ضغط حالياً، حاول بعد شوية" : e.message?.length<60 && !/permission|FirebaseError/i.test(e.message) ? e.message : "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
 }
 
 /* order detail */

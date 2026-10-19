@@ -255,13 +255,15 @@ onAuthStateChanged(auth, async u => {
   const live = (q, key, sort=true) => unsubs.push(onSnapshot(q, s => {
     watchNew(key, s);
     D[key] = s.docs.map(d=>({id:d.id,...d.data()})); if (sort) D[key].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw();
+    if (key === "products" || key === "cats") { loaded[key] = true; scheduleCatalog(); }
   }, e => console.error(key, e)));
-  live(query(collection(db,"orders"), orderBy("createdAt","desc"), limit(400)), "orders");
-  live(query(collection(db,"topups"), orderBy("createdAt","desc"), limit(400)), "topups");
+  live(query(collection(db,"orders"), orderBy("createdAt","desc"), limit(150)), "orders");
+  live(query(collection(db,"topups"), orderBy("createdAt","desc"), limit(100)), "topups");
   live(query(collection(db,"tickets"), orderBy("createdAt","desc"), limit(300)), "tickets");
   live(collection(db,"products"), "products", false);
   live(collection(db,"banners"), "banners", false);
   live(collection(db,"categories"), "cats", false);
+  unsubs.push(onSnapshot(doc(db,"catalog","c0"), s => { catHead = s.exists() ? s.data() : null; loaded.head = true; scheduleCatalog(); }, () => { loaded.head = true; }));
   unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
   if (ROLE === "staff") unsubs.push(onSnapshot(doc(db,"admins",u.uid), s => {
     if (!s.exists()) { unsubs.forEach(f=>f()); unsubs=[]; return scr("noadmin"); }
@@ -272,6 +274,34 @@ onAuthStateChanged(auth, async u => {
   unsubs.push(onSnapshot(collection(db,"users"), s => { D.users = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw(); if (openUser) uOpen(openUser, true); }, e => console.error("users", e)));
 });
 let openUser = null, ROLE = "owner", PERMS = [];
+/* ---------- catalog bundle (what the store reads) ---------- */
+let catHead = null, catT = 0, catBusy = false; const loaded = {};
+const strip = o => JSON.parse(JSON.stringify(o, (k, v) => (v && typeof v === "object" && typeof v.toMillis === "function") ? undefined : v));
+function catalogData(){
+  // everything the store needs, minus supplier/cost internals and timestamps (keeps the bundle small and private)
+  const clean = o => { const r = {}; for (const k in o) if (!/^(sup|cost|createdAt|updatedAt)/i.test(k)) r[k] = o[k]; return r; };
+  const items = D.products.filter(p => p.active !== false).map(p => strip({ ...clean(p), options:(p.options||[]).map(clean) }));
+  const cats = D.cats.filter(c => c.active !== false).map(c => strip(clean(c)));
+  return { items, cats };
+}
+function hashStr(t){ let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + "-" + t.length.toString(36); }
+function scheduleCatalog(){ if (!loaded.products || !loaded.cats || !loaded.head || !can("products")) return; clearTimeout(catT); catT = setTimeout(rebuildCatalog, 1500); }
+async function rebuildCatalog(){
+  if (catBusy) return scheduleCatalog();
+  const { items, cats } = catalogData();
+  const hash = hashStr(JSON.stringify([items, cats]));
+  if (catHead && catHead.hash === hash) return;
+  catBusy = true;
+  try {
+    const LIMIT = 700000, chunks = [[]]; let size = JSON.stringify(cats).length + 2000;
+    for (const it of items) { const l = JSON.stringify(it).length; if (size + l > LIMIT && chunks[chunks.length-1].length) { chunks.push([]); size = 2000; } chunks[chunks.length-1].push(it); size += l; }
+    const ver = Date.now().toString(36), b = writeBatch(db);
+    chunks.forEach((c, i) => b.set(doc(db,"catalog","c"+i), i === 0 ? { ver, n: chunks.length, hash, cats, items:c, at: serverTimestamp() } : { ver, items:c }));
+    for (let i = chunks.length; i < (catHead?.n || 0); i++) b.delete(doc(db,"catalog","c"+i));
+    await b.commit();
+  } catch(e) { console.warn("catalog", e); }
+  catBusy = false;
+}
 const PERM_LIST = [["orders","الطلبات"],["topups","طلبات الشحن"],["tickets","التذاكر"],["products","المنتجات"],["banners","البانرات"],["users","عرض المستخدمين"],["balance","تعديل الأرصدة يدوياً"],["settings","الإعدادات"]];
 const DEF_PERMS = ["orders","topups","tickets"];
 const can = p => ROLE === "owner" || PERMS.includes(p);
