@@ -167,9 +167,6 @@ textarea.inp{min-height:80px;resize:vertical}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, orderBy, limit, onSnapshot,
-  runTransaction, serverTimestamp, increment, writeBatch }
-  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMessaging, getToken, deleteToken, isSupported as fcmSupported } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 
 const fb = initializeApp({
@@ -182,7 +179,22 @@ const fb = initializeApp({
   appId: "1:397926299412:web:2c82ba4a13e3c4f168f401",
   measurementId: "G-F9MNWVD07C"
 });
-const auth = getAuth(fb), db = getFirestore(fb);
+const auth = getAuth(fb);
+/* ---------- data layer: everything goes through the store server ---------- */
+const API = "https://cardplay-notify.sdkhyrallh08.workers.dev";
+const db = null;
+const genId = () => { const c = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", b = crypto.getRandomValues(new Uint8Array(20)); let x = ""; b.forEach(v => x += c[v % 62]); return x; };
+const collection = (_, col) => ({ col });
+const doc = (a, col, id) => (col === undefined ? { col: a.col, id: genId() } : { col, id });
+const serverTimestamp = () => ({ __ts: 1 });
+const increment = n => ({ __inc: n });
+async function ops(list){ if (!list.length) return; await api("admin_ops", { ops: list }); setTimeout(adminKick, 300); }
+const setDoc = (r, data) => ops([{ op:"set", col:r.col, id:r.id, data }]);
+const updateDoc = (r, data) => ops([{ op:"update", col:r.col, id:r.id, data }]);
+const deleteDoc = r => ops([{ op:"delete", col:r.col, id:r.id }]);
+const addDoc = async (c, data) => { const r = doc(c); await setDoc(r, data); return r; };
+const writeBatch = () => { const L = []; return { set:(r,d)=>L.push({ op:"set", col:r.col, id:r.id, data:d }), update:(r,d)=>L.push({ op:"update", col:r.col, id:r.id, data:d }),
+  delete:r=>L.push({ op:"delete", col:r.col, id:r.id }), commit:async ()=>{ for (let k = 0; k < L.length; k += 100) await ops(L.slice(k, k+100)); } }; };
 
 const $ = s => document.querySelector(s);
 const iso = s => "\u2068" + s + "\u2069";
@@ -199,7 +211,7 @@ const WC = k => (PAYS().find(p=>p.key===k)||{}).cur || "د.ل";
 const walletChips = u => { const w = u.wallets||{}; return PAYS().map(p=>`<span class="wchip ${(w[p.key]||0)>0?"on":""}">${esc(p.name)}: ${money(w[p.key]||0, p.cur)}</span>`).join("") + (u.balance?`<span class="wchip on">قديم: ${money(u.balance)}</span>`:""); };
 const walletsLine = u => { const w = u.wallets||{}; const parts = PAYS().map(p=>`${esc(p.name)}: ${money(w[p.key]||0, p.cur)}`); if (u.balance) parts.push(`قديم: ${money(u.balance)}`); return parts.join(" · "); };
 const toCents = v => Math.round(parseFloat(String(v).replace(",", ".")) * 100);
-const ms = t => t?.toMillis ? t.toMillis() : 0;
+const ms = t => typeof t === "number" ? t : t?.toMillis ? t.toMillis() : (typeof t === "string" ? Date.parse(t) || 0 : 0);
 const fdate = t => { const m = ms(t); if (!m) return "—"; const d=new Date(m), p=n=>String(n).padStart(2,"0"); return `\u2066${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}\u2069`; };
 let tt; const toast = (m,t="") => { const e=$("#toast"); e.textContent=m; e.className="on "+t; clearTimeout(tt); tt=setTimeout(()=>e.className="",2800); };
 const copy = async t => { try{ await navigator.clipboard.writeText(t); toast("تم النسخ ✓","s"); }catch{ toast("تعذر النسخ","e"); } };
@@ -242,66 +254,92 @@ const selP = new Set();
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
+const AS = { since:0, busy:false, T:0, gen:0, seen:new Map(), uid:"" };
+const COLMAP = { orders:"orders", topups:"topups", tickets:"tickets", products:"products", banners:"banners", categories:"cats", users:"users" };
+function applyDocs(docs, initial){
+  let changed = false, permsChanged = false; const fresh = [];
+  for (const d of docs) {
+    const key = d.c + "/" + d.i;
+    if (AS.seen.get(key) === d.u) continue;
+    AS.seen.set(key, d.u); changed = true;
+    if (d.c === "settings") { if (d.i === "app") { D.settings = d.x ? {} : d.d; maybeRefreshFcm(); } continue; }
+    if (d.c === "admins") {
+      if (d.i === AS.uid) {
+        if (d.x || !d.d.role) { AS.gen++; clearTimeout(AS.T); scr("noadmin"); return; }
+        if (ROLE === "staff") { PERMS = Array.isArray(d.d.perms) ? d.d.perms : DEF_PERMS; permsChanged = true; }
+      }
+      const i = D.staff.findIndex(x => x.id === d.i);
+      if (i >= 0) D.staff.splice(i, 1);
+      if (!d.x && d.d.role === "staff") D.staff.push({ id:d.i, ...d.d });
+      continue;
+    }
+    const k = COLMAP[d.c]; if (!k) continue;
+    const arr = D[k], i = arr.findIndex(x => x.id === d.i);
+    if (d.x) { if (i >= 0) arr.splice(i, 1); continue; }
+    const o = { id:d.i, ...d.d };
+    if (i >= 0) arr[i] = o; else { arr.push(o); if (!initial) fresh.push([d.c, o]); }
+  }
+  if (!changed) return;
+  ["orders","topups","tickets","users"].forEach(k => D[k].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)));
+  if (permsChanged) { if (!allowedTabs().includes(tab)) tab = allowedTabs()[0] || "orders"; $("#main").dataset.t = ""; }
+  draw();
+  if (openUser) uOpen(openUser, true);
+  fresh.forEach(([c, o]) => watchNew(c, o));
+}
+async function adminPull(){
+  if (AS.busy || !auth.currentUser) return;
+  AS.busy = true; const gen = AS.gen;
+  try {
+    let more = true, guard = 0, overlap = true;
+    while (more && guard++ < 15) {
+      const j = await api("admin_sync", { since: AS.since ? AS.since - (overlap ? 5000 : 0) : 0 });
+      if (gen !== AS.gen) return;
+      applyDocs(j.docs || [], !AS.since);
+      AS.since = j.now; more = !!j.more; overlap = false;
+    }
+  } catch (e) { console.error(e); }
+  finally { AS.busy = false; }
+}
+function adminLoop(){ clearTimeout(AS.T); if (!auth.currentUser) return; AS.T = setTimeout(async () => { await adminPull(); adminLoop(); }, document.hidden ? 60000 : 5000); }
+async function adminKick(){ clearTimeout(AS.T); await adminPull(); adminLoop(); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && auth.currentUser && AS.since) adminKick(); });
+
 onAuthStateChanged(auth, async u => {
-  unsubs.forEach(f=>f()); unsubs=[]; for (const k in seenFirst) delete seenFirst[k];
+  clearTimeout(AS.T); AS.gen++; AS.since = 0; AS.seen = new Map(); AS.uid = u?.uid || "";
+  Object.assign(D, { cats:[], staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} });
   if (!u) return scr("login");
-  let ad = null;
-  try { const a = await getDoc(doc(db,"admins",u.uid)); if (a.exists()) ad = a.data(); } catch {}
-  if (!ad) return scr("noadmin");
-  ROLE = ad.role === "staff" ? "staff" : "owner"; PERMS = Array.isArray(ad.perms) ? ad.perms : DEF_PERMS;
+  let me = null;
+  try { me = await api("admin_me"); } catch (e) { if (!/صلاحية/.test(e.message)) toast(e.message, "e"); }
+  if (!me || AS.uid !== u.uid) return scr("noadmin");
+  ROLE = me.role === "staff" ? "staff" : "owner"; PERMS = Array.isArray(me.perms) ? me.perms : DEF_PERMS;
   if (!allowedTabs().includes(tab)) tab = "orders";
   $("#who").textContent = (ROLE==="staff" ? "موظف · " : "") + (u.email || "");
   scr("panel");
-  const live = (q, key, sort=true) => unsubs.push(onSnapshot(q, s => {
-    watchNew(key, s);
-    D[key] = s.docs.map(d=>({id:d.id,...d.data()})); if (sort) D[key].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw();
-    if (key === "products" || key === "cats") { loaded[key] = true; scheduleCatalog(); }
-  }, e => console.error(key, e)));
-  live(query(collection(db,"orders"), orderBy("createdAt","desc"), limit(150)), "orders");
-  live(query(collection(db,"topups"), orderBy("createdAt","desc"), limit(100)), "topups");
-  live(query(collection(db,"tickets"), orderBy("createdAt","desc"), limit(300)), "tickets");
-  live(collection(db,"products"), "products", false);
-  live(collection(db,"banners"), "banners", false);
-  live(collection(db,"categories"), "cats", false);
-  unsubs.push(onSnapshot(doc(db,"catalog","c0"), s => { catHead = s.exists() ? s.data() : null; loaded.head = true; scheduleCatalog(); }, () => { loaded.head = true; }));
-  unsubs.push(onSnapshot(doc(db,"settings","app"), s => { D.settings = s.exists()? s.data() : {}; draw(); maybeRefreshFcm(); }));
-  if (ROLE === "staff") unsubs.push(onSnapshot(doc(db,"admins",u.uid), s => {
-    if (!s.exists()) { unsubs.forEach(f=>f()); unsubs=[]; return scr("noadmin"); }
-    PERMS = Array.isArray(s.data().perms) ? s.data().perms : DEF_PERMS;
-    if (!allowedTabs().includes(tab)) tab = allowedTabs()[0] || "orders";
-    $("#main").dataset.t = ""; draw(); }));
-  if (ROLE === "owner") unsubs.push(onSnapshot(collection(db,"admins"), s => { D.staff = s.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.role==="staff"); draw(); }, e => console.error("staff", e)));
-  unsubs.push(onSnapshot(collection(db,"users"), s => { D.users = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); draw(); if (openUser) uOpen(openUser, true); }, e => console.error("users", e)));
+  await adminPull(); adminLoop();
+  if (ROLE === "owner") migWatch(me.mig);
 });
+/* ---------- moving the old data (shows progress until it's done) ---------- */
+let migT = 0;
+function migBar(html){
+  let el = document.getElementById("migBar");
+  if (!html) { el?.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "migBar"; el.style.cssText = "margin:10px 12px 0;padding:11px 14px;border-radius:12px;background:rgba(234,179,8,.14);border:1px solid rgba(234,179,8,.45);font-size:13.5px;line-height:1.8"; $("#panel").prepend(el); }
+  el.innerHTML = html;
+}
+function migWatch(m){
+  clearTimeout(migT);
+  if (!m || m.done) { migBar(""); return; }
+  if (m.err === "quota") migBar(`⏳ <b>نقل البيانات القديمة</b> — القاعدة القديمة مقفولة لين يتجدد العداد اليومي (حوالي 9 الصبح). النقل يكمّل بروحه، ما تحتاج تدير شي.${m.n?` (تم نقل ${m.n} لين توا)`:""}`);
+  else migBar(`⏳ <b>جاري نقل البيانات القديمة</b>... تم نقل ${m.n||0}. خلّي الصفحة مفتوحة يكمّل أسرع، أو سكّرها ويكمّل بروحه.`);
+  migT = setTimeout(async () => {
+    if (!auth.currentUser || ROLE !== "owner") return;
+    let next = m;
+    try { next = (await api("mig_run")).mig || m; if (next.n !== m.n) adminKick(); } catch (e) { console.warn(e); }
+    if (next.done) { migBar(""); toast("تم نقل كل البيانات ✓","s"); adminKick(); return; }
+    migWatch(next);
+  }, m.err === "quota" ? 60000 : 1200);
+}
 let openUser = null, ROLE = "owner", PERMS = [];
-/* ---------- catalog bundle (what the store reads) ---------- */
-let catHead = null, catT = 0, catBusy = false; const loaded = {};
-const strip = o => JSON.parse(JSON.stringify(o, (k, v) => (v && typeof v === "object" && typeof v.toMillis === "function") ? undefined : v));
-function catalogData(){
-  // everything the store needs, minus supplier/cost internals and timestamps (keeps the bundle small and private)
-  const clean = o => { const r = {}; for (const k in o) if (!/^(sup|cost|createdAt|updatedAt)/i.test(k)) r[k] = o[k]; return r; };
-  const items = D.products.filter(p => p.active !== false).map(p => strip({ ...clean(p), options:(p.options||[]).map(clean) }));
-  const cats = D.cats.filter(c => c.active !== false).map(c => strip(clean(c)));
-  return { items, cats };
-}
-function hashStr(t){ let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + "-" + t.length.toString(36); }
-function scheduleCatalog(){ if (!loaded.products || !loaded.cats || !loaded.head || !can("products")) return; clearTimeout(catT); catT = setTimeout(rebuildCatalog, 1500); }
-async function rebuildCatalog(){
-  if (catBusy) return scheduleCatalog();
-  const { items, cats } = catalogData();
-  const hash = hashStr(JSON.stringify([items, cats]));
-  if (catHead && catHead.hash === hash) return;
-  catBusy = true;
-  try {
-    const LIMIT = 700000, chunks = [[]]; let size = JSON.stringify(cats).length + 2000;
-    for (const it of items) { const l = JSON.stringify(it).length; if (size + l > LIMIT && chunks[chunks.length-1].length) { chunks.push([]); size = 2000; } chunks[chunks.length-1].push(it); size += l; }
-    const ver = Date.now().toString(36), b = writeBatch(db);
-    chunks.forEach((c, i) => b.set(doc(db,"catalog","c"+i), i === 0 ? { ver, n: chunks.length, hash, cats, items:c, at: serverTimestamp() } : { ver, items:c }));
-    for (let i = chunks.length; i < (catHead?.n || 0); i++) b.delete(doc(db,"catalog","c"+i));
-    await b.commit();
-  } catch(e) { console.warn("catalog", e); }
-  catBusy = false;
-}
 const PERM_LIST = [["orders","الطلبات"],["topups","طلبات الشحن"],["tickets","التذاكر"],["products","المنتجات"],["banners","البانرات"],["users","عرض المستخدمين"],["balance","تعديل الأرصدة يدوياً"],["settings","الإعدادات"]];
 const DEF_PERMS = ["orders","topups","tickets"];
 const can = p => ROLE === "owner" || PERMS.includes(p);
@@ -310,13 +348,14 @@ async function loadUsers(){}
 
 /* ================= server (worker) calls ================= */
 async function api(action, extra = {}){
-  const url = D.settings?.push?.worker;
-  if (!url) throw new Error("مفتاح 1 غير مضبوط في الإعدادات");
   const idToken = await auth.currentUser.getIdToken();
-  const r = await fetch(url, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ action, idToken, ...extra }) });
+  let r;
+  try { r = await fetch(API, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ action, idToken, ...extra }) }); }
+  catch { throw new Error("تحقق من اتصال الإنترنت"); }
   const j = await r.json().catch(()=>({}));
   if (r.status === 401 || r.status === 403) throw new Error("ما عندكش صلاحية لهذي العملية");
-  if (!j.ok && j.error) throw new Error("حدث خطأ في الاتصال بالمزوّد");
+  if (j.msg) throw new Error(j.msg);
+  if (!j.ok && (j.error || !r.ok)) throw new Error(action.startsWith("sup_") ? "حدث خطأ في الاتصال بالمزوّد" : "حدث خطأ، حاول مرة أخرى");
   return j;
 }
 const SUPS = { list:null, loading:false };
@@ -389,16 +428,10 @@ async function notify(title, body, tag){
   const reg = await getSW();
   try { if (reg) return reg.showNotification(title, opt); new Notification(title, opt); } catch(e){ try { new Notification(title, opt); } catch {} }
 }
-function watchNew(key, snap){
-  if (key !== "orders" && key !== "topups") return;
-  if (!seenFirst[key]) { seenFirst[key] = true; return; }
-  snap.docChanges().forEach(ch => {
-    if (ch.type !== "added") return;
-    const d = ch.doc.data();
-    if (d.status !== "pending") return;
-    if (key === "orders") notify("🛒 طلب شراء جديد", `${d.uName||""} — ${d.productName||""} ${d.optionLabel||""} — ${((d.price||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "o"+ch.doc.id);
-    else notify("💰 طلب شحن جديد", `${d.uName||""} — محفظة ${d.methodName||""} — ${((d.amount||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "t"+ch.doc.id);
-  });
+function watchNew(key, d){
+  if (d.status !== "pending") return;
+  if (key === "orders") notify("🛒 طلب شراء جديد", `${d.uName||""} — ${d.productName||""} ${d.optionLabel||""} — ${((d.price||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "o"+d.id);
+  else if (key === "topups") notify("💰 طلب شحن جديد", `${d.uName||""} — محفظة ${d.methodName||""} — ${((d.amount||0)/100).toFixed(2)} ${d.cur||"د.ل"}`, "t"+d.id);
 }
 nBtnUI();
 if (notifOn()) getSW();
@@ -464,7 +497,7 @@ topups(){
     <div class="kv"><span>العميل:</span><b>${esc(t.uName)} (<span class="num">${esc(t.uShort)}</span>)</b></div>
     ${t.ref?`<div class="kv"><span>المرجع:</span><b class="num">${esc(t.ref)}</b>${cpb(t.ref)}</div>`:""}
     ${Object.entries(t.fields||{}).map(([k,v])=>`<div class="kv"><span>${esc(k)}:</span><b class="num">${esc(v)}</b>${cpb(v)}</div>`).join("")}
-    ${t.shot?`<div style="margin-top:8px"><img src="${esc(t.shot)}" alt="" style="max-width:140px;max-height:140px;border-radius:10px;border:1px solid var(--line);cursor:zoom-in" onclick="viewShot('${t.id}')"></div>`:""}
+    ${t.shot||t.hasShot?`<div style="margin-top:8px"><button class="btn btn-o" onclick="viewShot('${t.id}')">🧾 عرض صورة الإيصال</button></div>`:""}
     ${t.note?`<div class="kv"><span>ملاحظة:</span><b>${esc(t.note)}</b></div>`:""}
     ${t.adminNote?`<div class="kv"><span>سبب الرفض:</span><b>${esc(t.adminNote)}</b></div>`:""}
     ${t.status==="pending"?`<div class="acts"><button class="btn btn-ok" onclick="tApprove('${t.id}')">قبول وإضافة الرصيد</button><button class="btn btn-x" onclick="tReject('${t.id}')">رفض</button></div>`:""}
@@ -710,33 +743,28 @@ window.oCancel = id => {
     <div class="fld"><label>سبب الإلغاء (يظهر للعميل)</label><input class="inp" id="cn" placeholder="مثال: الـ ID غير صحيح"></div>
     <button class="btn btn-x w" id="cB">إلغاء واسترجاع المبلغ</button>`);
   $("#cB").onclick = () => busy($("#cB"), async () => {
-    await runTransaction(db, async tx => {
-      const r = doc(db,"orders",id), s = await tx.get(r); const d = s.data();
-      if (d.status==="cancelled") throw new Error("الطلب ملغي مسبقاً");
-      tx.update(r, { status:"cancelled", refunded:true, delivery:"", adminNote:$("#cn").value.trim(), updatedAt:serverTimestamp() });
-      tx.update(doc(db,"users",d.uid), d.wallet ? { ["wallets."+d.wallet]: increment(d.price) } : { balance: increment(d.price) });
-    });
-    closeSheet(); toast("تم الإلغاء والاسترجاع ✓","s");
+    await api("order_refund", { id, note:$("#cn").value.trim() });
+    closeSheet(); toast("تم الإلغاء والاسترجاع ✓","s"); adminKick();
   });
 };
-window.viewShot = id => { const t = D.topups.find(x=>x.id===id); openSheet(`<h3>صورة الإيصال<button class="btn btn-o" onclick="closeSheet()">✕</button></h3><img src="${esc(t.shot)}" style="width:100%;border-radius:12px">`); };
+const shotCache = {};
+async function shotOf(id){ const t = D.topups.find(x=>x.id===id); if (t?.shot) return t.shot; if (!(id in shotCache)) shotCache[id] = (await api("admin_shot", { id })).shot || ""; return shotCache[id]; }
+async function fillShot(id, el, style){ if (!el) return; el.innerHTML = `<div style="color:var(--muted);padding:10px">جاري تحميل الصورة...</div>`;
+  try { const s = await shotOf(id); el.innerHTML = s ? `<img src="${esc(s)}" style="${style}">` : `<div style="color:var(--muted);padding:10px">ما فيش صورة</div>`; } catch { el.innerHTML = `<div style="color:var(--muted);padding:10px">تعذر تحميل الصورة</div>`; } }
+window.viewShot = id => { openSheet(`<h3>صورة الإيصال<button class="btn btn-o" onclick="closeSheet()">✕</button></h3><div id="shV"></div>`); fillShot(id, $("#shV"), "width:100%;border-radius:12px"); };
 window.tApprove = id => {
   const t = D.topups.find(x=>x.id===id);
   openSheet(`<h3>قبول طلب الشحن<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <p style="margin-bottom:10px">${esc(t.uName)} (<span class="num">${esc(t.uShort)}</span>) · محفظة ${esc(t.methodName)}${t.note?` · ${esc(t.note)}`:""}</p>
     ${Object.entries(t.fields||{}).map(([k,v])=>`<div class="kv"><span>${esc(k)}:</span><b class="num">${esc(v)}</b></div>`).join("")}
-    ${t.shot?`<img src="${esc(t.shot)}" style="width:100%;max-height:340px;object-fit:contain;border-radius:12px;margin:10px 0;border:1px solid var(--line)">`:""}
+    ${t.shot||t.hasShot?`<div id="taShot"></div>`:""}
     <div class="fld"><label>المبلغ الذي سيضاف (${esc(t.cur||WC(t.wallet||t.method))}) — عدّله لو المحوَّل مختلف</label><input class="inp num" id="ta" type="number" step="0.01" value="${(t.amount/100).toFixed(2)}"></div>
     <button class="btn btn-ok w" id="aB">قبول وإضافة الرصيد</button>`);
+  fillShot(id, $("#taShot"), "width:100%;max-height:340px;object-fit:contain;border-radius:12px;margin:10px 0;border:1px solid var(--line)");
   $("#aB").onclick = () => busy($("#aB"), async () => {
     const amount = toCents($("#ta").value); if (!(amount>0)) throw new Error("مبلغ غير صحيح");
-    await runTransaction(db, async tx => {
-      const r = doc(db,"topups",id), s = await tx.get(r);
-      if (s.data().status!=="pending") throw new Error("تمت معالجة الطلب مسبقاً");
-      tx.update(r, { status:"approved", amount, updatedAt:serverTimestamp() });
-      tx.update(doc(db,"users",s.data().uid), { ["wallets."+(s.data().wallet||s.data().method)]: increment(amount) });
-    });
-    closeSheet(); toast("تمت إضافة الرصيد ✓","s"); loadUsers();
+    await api("topup_approve", { id, amount });
+    closeSheet(); toast("تمت إضافة الرصيد ✓","s"); adminKick();
   });
 };
 window.tReject = id => {
@@ -765,13 +793,8 @@ window.uOpen = (id, refresh) => {
   const adj = sign => busy(null, async () => {
     const v = toCents($("#ua").value); if (!(v>0)) throw new Error("اكتب مبلغ صحيح");
     const amount = sign*v, w = $("#uw").value;
-    await runTransaction(db, async tx => {
-      const ur = doc(db,"users",id), us = await tx.get(ur);
-      if (((us.data().wallets||{})[w]||0) + amount < 0) throw new Error("رصيد المحفظة لا يكفي للخصم");
-      tx.set(doc(collection(db,"topups")), { uid:id, uName:u.name||"", uShort:u.short||"", method:"admin", methodName:"الإدارة", wallet:w, cur:WC(w), amount, note:$("#un").value.trim(), status:"approved", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-      tx.update(ur, { ["wallets."+w]: increment(amount) });
-    });
-    closeSheet(); toast("تم تعديل الرصيد ✓","s"); loadUsers();
+    await api("user_adjust", { uid:id, wallet:w, amount, note:$("#un").value.trim() });
+    closeSheet(); toast("تم تعديل الرصيد ✓","s"); adminKick();
   });
   if ($("#uAdd")) { $("#uAdd").onclick = () => adj(1); $("#uSub").onclick = () => adj(-1); }
 };
@@ -1039,7 +1062,7 @@ function supImportStep2(items){
         const cat = mk ? (x0.sub ? ensureCat("r:"+x0.root.id, x0.root.name, x0.root.image, dst) : dst) : dst;
         addProduct({ name: grp.name, image: grp.image || x0.p.image || "", catId: cat, needsInput: !!needKey, inputLabel: needKey?.p.label || "", inputHint: "", options: list.map(optOf) }); });
     }
-    for (let k = 0; k < ops.length; k += 400) { const b = writeBatch(db); ops.slice(k, k+400).forEach(f => f(b)); await b.commit(); }
+    for (let k = 0; k < ops.length; k += 100) { const b = writeBatch(db); ops.slice(k, k+100).forEach(f => f(b)); await b.commit(); }
     closeSheet(); toast(`تمت إضافة ${nP} منتج ✓`, "s"); tab = "products"; draw();
   });
 }
@@ -1069,7 +1092,7 @@ window.cDel = id => {
   if (!confirm(n ? `القسم فيه ${n} منتجات، حيرجعوا يظهروا في الرئيسية. حذف القسم؟` : "حذف القسم؟")) return;
   busy(null, async () => { const b = writeBatch(db); D.products.filter(p=>p.catId===id).forEach(p => b.update(doc(db,"products",p.id), { catId:"" })); b.delete(doc(db,"categories",id)); await b.commit(); toast("تم الحذف","s"); });
 };
-async function bulkWrite(fn){ const ids = [...selP]; for (let k = 0; k < ids.length; k += 400) { const b = writeBatch(db); ids.slice(k, k+400).forEach(id => fn(b, doc(db,"products",id))); await b.commit(); } return ids.length; }
+async function bulkWrite(fn){ const ids = [...selP]; for (let k = 0; k < ids.length; k += 100) { const b = writeBatch(db); ids.slice(k, k+100).forEach(id => fn(b, doc(db,"products",id))); await b.commit(); } return ids.length; }
 window.bulkMove = () => {
   openSheet(`<h3>نقل ${selP.size} منتج لقسم<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <div class="fld"><label>القسم الجديد</label><select class="inp" id="bmC">${catOptions("")}</select></div>

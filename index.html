@@ -476,8 +476,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider,
   signInWithPopup, signInWithRedirect, getRedirectResult, sendPasswordResetEmail, signOut, updateProfile, updatePassword }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, query, where, onSnapshot, runTransaction, serverTimestamp }
-  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyARNJOPAycWU3YJdZSBN1d9uoLrvso3i4Y",
@@ -491,7 +489,17 @@ const firebaseConfig = {
 };
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
-const db = getFirestore(fb);
+const API = "https://cardplay-notify.sdkhyrallh08.workers.dev";
+async function call(action, data = {}){
+  const body = { action, ...data };
+  if (auth.currentUser) body.token = await auth.currentUser.getIdToken();
+  let r;
+  try { r = await fetch(API, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify(body) }); }
+  catch { throw new Error("تحقق من اتصال الإنترنت"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.msg || "حدث خطأ، حاول مرة أخرى");
+  return j;
+}
 
 /* ================= helpers ================= */
 const $ = s => document.querySelector(s);
@@ -500,7 +508,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&l
 const ic = (n, cls="") => `<svg class="i ${cls}" viewBox="0 0 24 24"><use href="#i-${n}"/></svg>`;
 const money = (c, cur="د.ل") => `<span class="num">${((Number(c)||0)/100).toFixed(2)}</span> ${esc(cur)}`;
 const toCents = v => Math.round(parseFloat(String(v).replace(",", ".")) * 100);
-const ms = t => t?.toMillis ? t.toMillis() : (t?.seconds ? t.seconds*1000 : 0);
+const ms = t => typeof t === "number" ? t : t?.toMillis ? t.toMillis() : (t?.seconds ? t.seconds*1000 : (typeof t === "string" ? Date.parse(t) || 0 : 0));
 const fdate = t => { const m = ms(t); if (!m) return "الآن"; const d = new Date(m);
   const p = n => String(n).padStart(2,"0");
   return `\u2066${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}\u2069`; };
@@ -630,7 +638,6 @@ $("#authForm").onsubmit = async e => {
       pendingProfile = { name: $("#aName").value.trim(), phone: $("#aPhone").value.trim() };
       const cr = await createUserWithEmailAndPassword(auth, email, pass);
       await updateProfile(cr.user, { displayName: pendingProfile.name });
-      await ensureUserDoc(cr.user);
     } else {
       await signInWithEmailAndPassword(auth, email, pass);
     }
@@ -653,57 +660,65 @@ $("#gBtn").onclick = async () => {
 getRedirectResult(auth).catch(err => $("#aErr").textContent = aerr(err));
 
 let pendingProfile = null;
-const ensuring = {};
-function ensureUserDoc(u){ return ensuring[u.uid] ||= _ensure(u).finally(()=>setTimeout(()=>delete ensuring[u.uid],3000)); }
-async function _ensure(u){
-  const ref = doc(db, "users", u.uid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) { if (!snap.data().wallets) await updateDoc(ref, { wallets:{} }).catch(()=>{}); return; }
-  const short = "CP" + String(Math.floor(100000 + Math.random()*900000));
-  await setDoc(ref, {
-    name: (pendingProfile?.name || u.displayName || (u.email||"").split("@")[0] || "مستخدم").slice(0,60),
-    email: u.email || "", phone: (pendingProfile?.phone || u.phoneNumber || "").slice(0,20),
-    photo: u.photoURL || "", short, wallets: {}, defWallet: "", createdAt: serverTimestamp()
-  });
-  pendingProfile = null;
-}
-
 /* ================= session ================= */
+// account data (wallets, orders, top-ups, tickets): checked often while something is in progress, rarely otherwise
+const SY = { since:0, busy:false, gen:0, T:0, seen:new Map(), me:"" };
+async function syncNow(){
+  if (!S.user || SY.busy) return;
+  SY.busy = true; const gen = SY.gen;
+  try {
+    const j = await call("sync", { since: SY.since ? SY.since - 5000 : 0, profile: pendingProfile || undefined });
+    if (gen !== SY.gen) return;
+    pendingProfile = null;
+    let changed = false;
+    if (j.me) { const t = JSON.stringify(j.me); if (t !== SY.me) { SY.me = t; S.me = j.me; changed = true; } }
+    const L = { orders:S.orders, topups:S.topups, tickets:S.tickets };
+    for (const d of j.docs) {
+      const arr = L[d.c]; if (!arr || SY.seen.get(d.c+d.i) === d.u) continue;
+      SY.seen.set(d.c+d.i, d.u); changed = true;
+      const i = arr.findIndex(x => x.id === d.i);
+      if (d.x) { if (i >= 0) arr.splice(i, 1); continue; }
+      const o = { id:d.i, ...d.d }; if (i >= 0) arr[i] = o; else arr.push(o);
+    }
+    if (changed) { for (const k in L) L[k].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); }
+    SY.since = j.now;
+  } catch (e) { console.error(e); }
+  finally { SY.busy = false; }
+}
+function syncDelay(){
+  const now = Date.now();
+  if (S.orders.some(o => ["pending","processing"].includes(o.status) && now - ms(o.createdAt) < 30*60*1000)) return 4000;
+  if (S.orders.some(o => ["pending","processing"].includes(o.status) && now - ms(o.createdAt) < 6*3600*1000)) return 20000;
+  if (S.topups.some(t => t.status === "pending" && now - ms(t.createdAt) < 24*3600*1000)) return 20000;
+  return 90000;
+}
+function syncLoop(){ clearTimeout(SY.T); if (!S.user) return; SY.T = setTimeout(async () => { if (!document.hidden) await syncNow(); syncLoop(); }, syncDelay()); }
+async function syncKick(){ clearTimeout(SY.T); await syncNow(); syncLoop(); }
 onAuthStateChanged(auth, async u => {
-  S.unsubs.forEach(f => f()); S.unsubs = [];
+  clearTimeout(SY.T); SY.gen++; SY.since = 0; SY.seen = new Map(); SY.me = "";
   S.user = u; S.me = null; S.orders = []; S.topups = []; S.tickets = [];
   if (!u) { show("auth"); busy($("#aBtn"), false, mode==="reg"?"إنشاء حساب":"تسجيل الدخول"); return; }
-  try { await ensureUserDoc(u); } catch (e) { console.error(e); toast("حدث خطأ في قاعدة البيانات، حاول مرة أخرى","e"); }
-  const mine = c => query(collection(db, c), where("uid","==",u.uid));
-  S.unsubs.push(
-    onSnapshot(doc(db,"users",u.uid), s => { S.me = s.exists() ? { id:s.id, ...s.data() } : null; render(); }),
-    onSnapshot(mine("orders"),  s => { S.orders  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); }),
-    onSnapshot(mine("topups"),  s => { S.topups  = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); }),
-    onSnapshot(mine("tickets"), s => { S.tickets = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)); render(); })
-  );
   show("app");
   if (!location.hash) location.hash = "#home"; else render();
+  await syncKick();
+  if (!S.me) toast("حدث خطأ في الاتصال، حاول مرة أخرى","e");
 });
-// public data
-// catalog bundle: all products + sections packed in a few documents (keeps daily reads tiny)
-let legacyOn = false;
-function legacyCatalog(){
-  if (legacyOn) return; legacyOn = true;
-  onSnapshot(collection(db,"products"), s => { S.products = s.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); S.ready.products=true; render(); }, ()=>{ S.ready.products=true; render(); });
-  onSnapshot(collection(db,"categories"), s => { S.cats = s.docs.map(d=>({id:d.id,...d.data()})).filter(c=>c.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
-}
-onSnapshot(collection(db,"catalog"), s => {
-  const docs = s.docs.map(d=>({ id:d.id, ...d.data() }));
-  const head = docs.find(d=>d.id==="c0");
-  if (!head || !head.n) return legacyCatalog();
-  const parts = docs.filter(d => /^c\d+$/.test(d.id) && d.ver === head.ver).sort((a,b)=>+a.id.slice(1) - +b.id.slice(1));
-  if (parts.length < head.n) return;                      // a rebuild is in progress; keep what we have
-  S.products = parts.flatMap(d => d.items || []).sort((a,b)=>(a.sort??999)-(b.sort??999));
-  S.cats = (head.cats || []).sort((a,b)=>(a.sort??999)-(b.sort??999));
+// public data (products, sections, banners, settings): one light request
+let pubAt = 0;
+async function loadPublic(){
+  pubAt = Date.now();
+  try {
+    const r = await fetch(API + "/public"); const j = await r.json();
+    if (!j.ok) throw new Error("public");
+    const bySort = (a,b)=>(a.sort??999)-(b.sort??999);
+    S.products = (j.products||[]).sort(bySort); S.cats = (j.cats||[]).sort(bySort); S.banners = (j.banners||[]).sort(bySort);
+    S.settings = set(j.settings || {});
+  } catch (e) { console.error(e); }
   S.ready.products = true; render();
-}, () => legacyCatalog());
-onSnapshot(collection(db,"banners"), s => { S.banners = s.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.active!==false).sort((a,b)=>(a.sort??999)-(b.sort??999)); render(); }, ()=>{});
-onSnapshot(doc(db,"settings","app"), s => { S.settings = set(s.exists()? s.data() : {}); render(); }, ()=>{});
+}
+loadPublic();
+setInterval(() => { if (!document.hidden && Date.now() - pubAt > 120000) loadPublic(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) return; if (Date.now() - pubAt > 60000) loadPublic(); if (S.user) syncKick(); });
 
 function show(which){
   const boot = $("#boot"); if (boot) { boot.style.opacity = 0; setTimeout(()=>boot.remove(), 400); }
@@ -890,7 +905,7 @@ window.setOtab = k => { S.otab = k; render(); };
 window.setHtab = k => { S.htab = k; render(); };
 window.setDefW = async (k, quiet) => {
   if (S.me) S.me.defWallet = k; render();
-  try { await updateDoc(doc(db,"users",S.user.uid), { defWallet:k }); if (!quiet) toast(`تم التحويل لمحفظة ${W(k).name} ✓`,"s"); } catch(e){ console.error(e); toast("تعذر التعديل","e"); }
+  try { await call("defwallet", { k }); if (!quiet) toast(`تم التحويل لمحفظة ${W(k).name} ✓`,"s"); } catch(e){ console.error(e); toast("تعذر التعديل","e"); }
 };
 window.openWSwitch = () => {
   const dk = defW();
@@ -1006,24 +1021,12 @@ async function buy(p, i, wk){
   const input = $("#pIn")?.value.trim() || "";
   if (p.needsInput && !input) return toast(`اكتب ${p.inputLabel||"ID اللاعب"}`,"e");
   const btn = $("#buyBtn"); busy(btn,true);
-  const uref = doc(db,"users",S.user.uid), oref = doc(collection(db,"orders"));
   try {
-    await runTransaction(db, async tx => {
-      const us = await tx.get(uref), ps = await tx.get(doc(db,"products",p.id));
-      if (!ps.exists() || ps.data().active===false) throw new Error("المنتج غير متاح حالياً");
-      const pd = ps.data(), o = (pd.options||[])[i]; if (!o) throw new Error("الباقة غير متاحة");
-      const price = priceFor(o, wk);
-      if (!(price > 0)) throw new Error("الباقة غير متوفرة بهذه المحفظة");
-      const bal = Number((us.data().wallets||{})[wk]) || 0;
-      if (bal < price) throw new Error("رصيد المحفظة غير كافي");
-      tx.set(oref, { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", productId:p.id, productName:pd.name,
-        optionIndex:i, optionLabel:o.label, price, wallet:wk, cur:curOf(wk), input, no:String(Date.now()).slice(-7),
-        status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-      tx.update(uref, { ["wallets."+wk]: bal - price, lastOrder: oref.id });
-    });
-    pingAdmin("orders", oref.id);
+    await call("buy", { pid:p.id, idx:i, wk, input });
     closeSheet(); toast("تم استلام طلبك ✓ سيتم تنفيذه قريباً","s"); S.otab="all"; location.hash="#orders";
-  } catch (e) { console.error(e); toast(/quota|exhausted/i.test(e.message||e.code||"") ? "الموقع عليه ضغط حالياً، حاول بعد شوية" : e.message?.length<60 && !/permission|FirebaseError/i.test(e.message) ? e.message : "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
+    if (S.me?.wallets) S.me.wallets[wk] = Math.max(0, (Number(S.me.wallets[wk])||0) - priceFor((p.options||[])[i], wk));
+    syncKick();
+  } catch (e) { console.error(e); toast(e.message || "تعذر إتمام الطلب، حاول مرة أخرى","e"); busy(btn,false); }
 }
 
 /* order detail */
@@ -1085,36 +1088,11 @@ window.openTopup = key => {
     if (si && !shot) return toast("ارفع صورة الإيصال","e");
     const btn = $("#tpBtn"); busy(btn,true);
     try {
-      const tref = await addDoc(collection(db,"topups"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", method:cur.key, methodName:cur.name,
-        wallet:cur.key, cur:cc, amount, fields, shot, note:$("#tpNote").value.trim(), status:"pending", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-      pingAdmin("topups", tref.id);
-      closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s");
-    } catch(err){ console.error(err); toast("تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
+      await call("topup", { wallet:cur.key, amount, fields, shot, note:$("#tpNote").value.trim() });
+      closeSheet(); toast("تم إرسال طلب الشحن ✓ قيد المراجعة","s"); syncKick();
+    } catch(err){ console.error(err); toast(err.message || "تعذر الإرسال، حاول مرة أخرى","e"); busy(btn,false); }
   };
 };
-
-/* admin alert ping */
-function pingAdmin(type, id){
-  const u = S.settings?.push?.worker; if (!u || !/^https:\/\//.test(u)) return;
-  try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ type, id }), keepalive:true }).catch(()=>{}); } catch {}
-}
-
-/* supplier status refresh for this customer's orders that are waiting at the supplier */
-const rePinged = new Set();
-setInterval(() => {
-  if (!S.user || !S.settings?.supplier?.enabled) return;
-  const now = Date.now();
-  S.orders.filter(o => o.status === "pending" && !o.sup && !rePinged.has(o.id) && now - ms(o.createdAt) > 15000 && now - ms(o.createdAt) < 30*60*1000)
-    .slice(0, 2).forEach(o => { rePinged.add(o.id); pingAdmin("orders", o.id); });
-}, 10000);
-let supPollT = 0;
-setInterval(() => {
-  const u = S.settings?.push?.worker; if (!u || !S.user) return;
-  if (Date.now() - supPollT < 30000) return;
-  const w = S.orders.filter(o => o.status === "processing" && o.sup?.state === "sent").slice(0, 3);
-  if (!w.length) return; supPollT = Date.now();
-  w.forEach(o => { try { fetch(u, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify({ action:"sup_check", id:o.id }) }).catch(()=>{}); } catch {} });
-}, 10000);
 
 /* tickets */
 async function sendTicket(e){
@@ -1122,10 +1100,9 @@ async function sendTicket(e){
   const msg = $("#tkMsg").value.trim(); if (msg.length<5) return toast("اكتب رسالتك بالتفصيل","e");
   const btn = $("#tkBtn"); busy(btn,true);
   try {
-    await addDoc(collection(db,"tickets"), { uid:S.user.uid, uName:S.me?.name||"", uShort:S.me?.short||"", type:$("#tkType").value, message:msg,
-      status:"open", reply:"", createdAt:serverTimestamp(), updatedAt:serverTimestamp() });
-    $("#tkMsg").value=""; toast("تم إرسال التذكرة ✓ سنرد عليك قريباً","s");
-  } catch(err){ console.error(err); toast("تعذر الإرسال","e"); }
+    await call("ticket", { type:$("#tkType").value, message:msg });
+    $("#tkMsg").value=""; toast("تم إرسال التذكرة ✓ سنرد عليك قريباً","s"); syncKick();
+  } catch(err){ console.error(err); toast(err.message || "تعذر الإرسال","e"); }
   busy(btn,false);
 }
 
@@ -1136,7 +1113,7 @@ async function saveInfo(e){
   if (name.length<2) return toast("اكتب اسمك","e");
   const btn = $("#iBtn"); busy(btn,true);
   try {
-    await updateDoc(doc(db,"users",S.user.uid), { name, phone });
+    await call("profile", { name, phone }); if (S.me) { S.me.name = name; S.me.phone = phone; }
     if (pass) { if (pass.length<6) throw { code:"auth/weak-password" }; await updatePassword(S.user, pass); $("#iPass").value=""; }
     toast("تم حفظ التغييرات ✓","s");
   } catch(err){ console.error(err); toast(err.code ? aerr(err) : "تعذر الحفظ","e"); }

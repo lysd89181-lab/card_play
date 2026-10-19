@@ -1,5 +1,5 @@
 {
-  // Cloudflare Worker for Card Play (admin notifications + supplier integration).
+  // Card Play backend (store data + admin + notifications + supplier integration).
   // Deployed automatically by Cloudflare Workers Builds (root directory: /worker).
   // Secrets set in the Cloudflare dashboard (never here): FIREBASE_SA, LP_KEY, LP_EMAIL
   "name": "cardplay-notify",
@@ -7,5 +7,9 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "observability": { "enabled": true },
-  "vars": { "FB_API_KEY": "AIzaSyARNJOPAycWU3YJdZSBN1d9uoLrvso3i4Y" }
+  "vars": { "FB_API_KEY": "AIzaSyARNJOPAycWU3YJdZSBN1d9uoLrvso3i4Y", "FB_PROJECT": "cd-card-87365" },
+  // the database is created automatically on the first deploy
+  "d1_databases": [{ "binding": "DB", "database_name": "cardplay" }],
+  // background jobs every minute: supplier orders + moving the old data
+  "triggers": { "crons": ["* * * * *"] }
 }
