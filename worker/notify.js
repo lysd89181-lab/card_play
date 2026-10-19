@@ -29,6 +29,7 @@ export default {
       const url = new URL(req.url);
       if (req.method === "GET") {
         if (url.pathname === "/public") return raw(await publicText(ctx), { "Cache-Control": "public, max-age=15" });
+        if (url.pathname === "/status") return new Response(await statusPage(ctx), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
         return json({ ok: true, service: "cardplay" });
       }
       if (req.method !== "POST") return json({ ok: false }, 405);
@@ -481,36 +482,58 @@ async function shotOf(ctx, id) {
 }
 
 /* ================= moving the old data (runs by itself until done) ================= */
-const MIG = [["settings", 50], ["products", 120], ["categories", 300], ["banners", 50], ["admins", 50], ["users", 150], ["orders", 150], ["topups", 150], ["tickets", 150]];
+// order = importance: staff first (so the panel opens), then balances, then catalogue and history.
+// image-heavy collections go in small pages so each run stays light.
+const MIG = [["admins", 50], ["settings", 10], ["users", 150], ["products", 20], ["categories", 30], ["banners", 5], ["orders", 150], ["topups", 150], ["tickets", 100]];
 const TOPUP_FIELDS = ["uid", "uName", "uShort", "method", "methodName", "wallet", "cur", "amount", "fields", "note", "status", "createdAt", "updatedAt", "adminNote", "notified"];
 async function migState(ctx) {
   const r = await ctx.db.prepare("SELECT v FROM meta WHERE k = 'mig'").first();
-  return r ? JSON.parse(r.v) : { i: 0, t: "", n: 0 };
+  return r ? JSON.parse(r.v) : { i: 0, t: "", n: 0, counts: {} };
+}
+const migSave = (ctx, m) => ctx.db.prepare("INSERT OR REPLACE INTO meta (k, v) VALUES ('mig', ?1)").bind(JSON.stringify(m));
+// only one runner at a time (cron, admin page and status page can all ask)
+async function migLock(ctx) {
+  const t = Date.now(), until = t + 45000;
+  const r = await ctx.db.prepare("INSERT INTO meta (k, v) VALUES ('miglock', ?1) ON CONFLICT (k) DO UPDATE SET v = excluded.v WHERE CAST(meta.v AS INTEGER) < ?2").bind(String(until), t).run();
+  return r.meta.changes === 1 ? String(until) : "";
 }
 async function migrateStep(ctx) {
-  const m = await migState(ctx);
+  let m = await migState(ctx);
   if (m.done || !ctx.env.FIREBASE_SA) return m;
-  const [col, size] = MIG[m.i];
-  let path = `${col}?pageSize=${size}` + (m.t ? `&pageToken=${encodeURIComponent(m.t)}` : "");
-  if (col === "topups") path += TOPUP_FIELDS.map(f => "&mask.fieldPaths=" + f).join("");
-  const r = await fsFetch(ctx, path);
-  if (!r.ok) {
-    m.err = r.status === 429 ? "quota" : "http " + r.status;
-    m.tries = (m.tries || 0) + 1;
-  } else {
+  const lock = await migLock(ctx);
+  if (!lock) return { ...m, busy: true };
+  try {
+    m.counts = m.counts || {};
+    // a run that stopped in the middle of a page is retried with a smaller page
+    const pos = m.i + "|" + (m.t || "");
+    if (m.pos === pos && m.started) m.sz = Math.max(1, Math.floor((m.sz || MIG[m.i][1]) / 2));
+    m.pos = pos; m.started = 1;
+    await migSave(ctx, m).run();
+    const [col, def] = MIG[m.i];
+    let path = `${col}?pageSize=${m.sz || def}` + (m.t ? `&pageToken=${encodeURIComponent(m.t)}` : "");
+    if (col === "topups") path += TOPUP_FIELDS.map(f => "&mask.fieldPaths=" + f).join("");
+    const r = await fsFetch(ctx, path);
+    if (!r.ok) {
+      m.started = 0; m.err = r.status === 429 ? "quota" : "http " + r.status;
+      await migSave(ctx, m).run();
+      return m;
+    }
     const j = await r.json();
     const docs = j.documents || [];
-    if (docs.length) await importDocs(ctx, col, docs);
-    m.n += docs.length; m.err = ""; m.tries = 0;
-    if (j.nextPageToken) m.t = j.nextPageToken; else { m.i++; m.t = ""; }
+    const st = docs.length ? await importStmts(ctx, col, docs) : [];
+    m.n = (m.n || 0) + docs.length; m.counts[col] = (m.counts[col] || 0) + docs.length;
+    m.err = ""; m.started = 0;
+    if (j.nextPageToken) m.t = j.nextPageToken; else { m.i++; m.t = ""; m.sz = 0; }
     if (m.i >= MIG.length) { m.done = true; m.at = Date.now(); }
+    // the page and the progress are saved together, so a page is never applied twice
+    st.push(migSave(ctx, m), pubDirty(ctx));
+    await ctx.db.batch(st);
+    return m;
+  } finally {
+    await ctx.db.prepare("DELETE FROM meta WHERE k = 'miglock' AND v = ?1").bind(lock).run();
   }
-  const st = [ctx.db.prepare("INSERT OR REPLACE INTO meta (k, v) VALUES ('mig', ?1)").bind(JSON.stringify(m))];
-  if (r.ok) st.push(pubDirty(ctx));
-  await ctx.db.batch(st);
-  return m;
 }
-async function importDocs(ctx, col, docs) {
+async function importStmts(ctx, col, docs) {
   const t = Date.now();
   const items = docs.map(d => {
     const id = d.name.split("/").pop(), data = decodeFields(d.fields || {}, true);
@@ -525,6 +548,8 @@ async function importDocs(ctx, col, docs) {
       const d = it.data;
       d.wallets = d.wallets && typeof d.wallets === "object" ? d.wallets : {};
       const now = map.get(it.id);
+      if (now && now._m) continue;            // already moved before: never add the old balance twice
+      d._m = 1;
       if (now) {
         for (const [k, v] of Object.entries(now.wallets || {})) d.wallets[k] = (Number(d.wallets[k]) || 0) + (Number(v) || 0);
         if (now.defWallet) d.defWallet = now.defWallet;
@@ -536,7 +561,21 @@ async function importDocs(ctx, col, docs) {
       st.push(ctx.db.prepare("INSERT OR IGNORE INTO docs (col, id, uid, data, v, created, updated, del) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, 0)")
         .bind(col, it.id, uidOf(col, it.id, it.data), JSON.stringify(col === "topups" ? { ...it.data, hasShot: true } : it.data), it.created, t));
   }
-  for (let k = 0; k < st.length; k += 100) await ctx.db.batch(st.slice(k, k + 100));
+  return st;
+}
+// progress page (no private data): opening it also pushes the move forward
+const MIG_AR = { admins: "الإدارة", settings: "الإعدادات", users: "الحسابات والأرصدة", products: "المنتجات", categories: "الأقسام", banners: "البانرات", orders: "الطلبات", topups: "طلبات الشحن", tickets: "التذاكر" };
+async function statusPage(ctx) {
+  let m = await migState(ctx);
+  if (!m.done) { try { m = await migrateStep(ctx); } catch (e) { console.error(e); } }
+  const rows = MIG.map(([c], i) => `<tr><td>${MIG_AR[c]}</td><td>${(m.counts || {})[c] || 0}</td><td>${m.done || i < m.i ? "✅" : i === m.i ? "⏳" : "—"}</td></tr>`).join("");
+  const msg = m.done ? "✅ تم نقل كل البيانات. الموقع شغّال على القاعدة الجديدة."
+    : !ctx.env.FIREBASE_SA ? "⚠️ مفتاح القاعدة القديمة مش مضبوط."
+    : m.err === "quota" ? "⏳ القاعدة القديمة مقفولة لين يتجدد العداد اليومي (حوالي 9 الصبح). النقل يبدا بروحه أول ما تفتح."
+    : "⏳ جاري النقل... خلّي الصفحة مفتوحة يكمّل أسرع.";
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${m.done ? "" : `<meta http-equiv="refresh" content="${m.err === "quota" ? 30 : 2}">`}<title>نقل البيانات</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1220;color:#e6edf7;margin:0;padding:24px 16px}main{max-width:460px;margin:auto}table{width:100%;border-collapse:collapse;margin-top:14px}td{padding:10px;border-bottom:1px solid #22304a}td:nth-child(2){text-align:center}.b{padding:14px;border-radius:12px;background:#15233d;line-height:1.8}</style></head>
+<body><main><h2>نقل البيانات</h2><div class="b">${msg}</div><table>${rows}</table><p style="color:#8aa0c0;font-size:13px">المجموع: ${m.n || 0}</p></main></body></html>`;
 }
 
 /* ================= old database access (moving data, old receipts, push) ================= */
