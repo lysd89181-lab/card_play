@@ -549,8 +549,7 @@ settings(){
 
   <div class="spane" data-pane="supplier" ${stab==="supplier"?"":"hidden"}>
     <div class="box2">
-      <label class="sw"><input type="checkbox" id="supEn" ${s.supplier?.enabled?"checked":""}> تفعيل الربط مع المزوّد</label>
-      <label class="sw"><input type="checkbox" id="supAuto" ${s.supplier?.auto?"checked":""}> تنفيذ الطلبات تلقائياً (أول ما الزبون يشري)</label>
+      <label class="sw"><input type="checkbox" id="supEn" ${s.supplier?.enabled?"checked":""}> تفعيل الربط مع المزوّد (الطلبات المربوطة تتنفذ تلقائياً فوراً)</label>
       <label class="sw" style="margin:0"><input type="checkbox" id="supSb" ${s.supplier?.sandbox?"checked":""}> وضع التجربة (ما يتخصمش من رصيد المزوّد)</label>
     </div>
     <div class="box2" style="margin-top:10px;display:flex;align-items:center;gap:10px;justify-content:space-between">
@@ -644,7 +643,7 @@ const A = {
     if (!types.length) throw new Error("لازم تصنيف واحد على الأقل");
     await setDoc(doc(db,"settings","app"), { payments, types, channels, faq, support:{ whatsapp:$("#sWa").value.trim(), telegram:$("#sTg").value.trim().replace(/^@/,"") },
       push:{ worker:$("#sPushW").value.trim().replace(/\/+$/,""), vapid:$("#sPushV").value.trim() },
-      supplier:{ enabled:$("#supEn").checked, auto:$("#supAuto").checked, sandbox:$("#supSb").checked }, updatedAt:serverTimestamp() });
+      supplier:{ enabled:$("#supEn").checked, auto:true, sandbox:$("#supSb").checked }, updatedAt:serverTimestamp() });
     toast("تم الحفظ ✓","s"); }); }; }
 };
 
@@ -654,6 +653,12 @@ window.supExec = (id, btn) => { if (confirm("إرسال الطلب للمزوّ�
   const r = await api("sup_exec", { id });
   if (r.state === "done") toast("تم التنفيذ ✓","s"); else if (r.state === "sent") toast("أُرسل للمزوّد ✓ بانتظار التنفيذ","s"); else toast(r.err || "ما تمش التنفيذ","e"); }); };
 window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
+const autoTried = new Set();
+setInterval(() => { if (!auth.currentUser || !D.settings?.supplier?.enabled || !can("orders")) return;
+  const now = Date.now();
+  D.orders.filter(o => o.status==="pending" && !o.sup && supLinked(o) && !autoTried.has(o.id) && now - ms(o.createdAt) > 20000 && now - ms(o.createdAt) < 6*3600*1000)
+    .slice(0, 3).forEach(o => { autoTried.add(o.id); api("sup_exec", { id:o.id }).catch(()=>{}); });
+}, 10000);
 let lastAutoSync = 0;
 setInterval(() => { if (!auth.currentUser || !D.settings?.supplier?.enabled || !can("orders")) return;
   if (!D.orders.some(o=>o.status==="processing"&&o.sup?.state==="sent")) return;

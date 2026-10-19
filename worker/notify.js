@@ -192,27 +192,30 @@ async function onNew(ctx, type, id) {
   const doc = await getDoc(ctx, `${type}/${id}`);
   if (!doc) return { skip: "missing" };
   const d = doc.data;
-  if (d.status !== "pending" || d.notified) return { skip: "done" };
+  if (d.status !== "pending") return { skip: "done" };
   const created = Date.parse(d.createdAt || doc.createTime || 0);
-  if (Date.now() - created > 10 * 60 * 1000) return { skip: "old" };
-  if (!(await patchDoc(ctx, `${type}/${id}`, { notified: true }, doc.updateTime))) return { skip: "race" };
+  const first = !d.notified;
+  if (Date.now() - created > (first ? 10 : 30) * 60 * 1000) return { skip: "old" };
+  if (first && !(await patchDoc(ctx, `${type}/${id}`, { notified: true }, doc.updateTime))) return { skip: "race" };
 
-  let sent = 0, exec = null;
-  if (type === "orders") {
+  // orders linked to the supplier are executed automatically (also retried when the ping is repeated)
+  let exec = null;
+  if (type === "orders" && !d.sup) {
     const st = await getDoc(ctx, "settings/app");
-    if (st?.data?.supplier?.enabled && st.data.supplier.auto) exec = await execOrder(ctx, id, false, st.data.supplier);
+    if (st?.data?.supplier?.enabled) exec = await execOrder(ctx, id, false, st.data.supplier);
   }
-  // push to admins (the order title reflects the supplier result when it ran)
+  if (!first) return { exec };
+
+  // the admin is only alerted when a human is needed
   const money = (c, cur) => `${(Number(c || 0) / 100).toFixed(2)} ${cur || "د.ل"}`;
+  if (type === "orders" && exec && (exec.state === "done" || exec.state === "sent")) return { sent: 0, exec };
   let title = type === "orders" ? "🛒 طلب شراء جديد" : "💰 طلب شحن جديد";
-  if (exec?.state === "done") title = "✅ طلب نُفّذ تلقائياً";
-  else if (exec?.state === "sent") title = "⏳ طلب أُرسل للمزوّد";
-  else if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
+  if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
   else if (exec?.state === "test") title = "🧪 طلب تجريبي (ما اتنفذش)";
   const body = type === "orders"
     ? `${d.uName || ""} — ${d.productName || ""} ${d.optionLabel || ""} — ${money(d.price, d.cur)}${exec?.state === "failed" ? " — " + exec.err : ""}`
     : `${d.uName || ""} — محفظة ${d.methodName || ""} — ${money(d.amount, d.cur)}`;
-  sent = await pushAll(ctx, title, body, (type === "orders" ? "o" : "t") + id);
+  const sent = await pushAll(ctx, title, body, (type === "orders" ? "o" : "t") + id);
   return { sent, exec };
 }
 
@@ -274,7 +277,7 @@ async function execOrder(ctx, id, manual, supSettings) {
       const codes = (Array.isArray(d.items) && d.items.length ? d.items : [d]).filter(c => c && c.secretNumber && !isRef(c.secretNumber));
       const ref = String(d.order_id ?? "") || [d.serialNumber, d.secretNumber].filter(isRef).map(refOf)[0] || "";
       if (codes.length) {
-        const lines = codes.flatMap(c => [`${c.secretNumber}`, c.serialNumber && !isRef(c.serialNumber) && c.serialNumber !== c.secretNumber && `Serial: ${c.serialNumber}`, c.exp_date && `Exp: ${c.exp_date}`]).filter(Boolean);
+        const lines = codes.map(c => String(c.secretNumber).trim()).filter(Boolean);
         await patchDoc(ctx, path, { status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, ref, at: new Date() }, updatedAt: new Date() });
         return { state: "done" };
       }
@@ -356,7 +359,7 @@ async function syncOrders(ctx, ids, rateLimit) {
 function deliveryText(m) {
   const v = m.delivery_data ?? m.code ?? m.codes ?? null;
   if (!v) return "";
-  const one = c => typeof c === "string" ? c : [c.secretNumber || c.code || c.pin, c.serialNumber && `Serial: ${c.serialNumber}`, (c.exp_date || c.expiry) && `Exp: ${c.exp_date || c.expiry}`].filter(Boolean).join("\n");
+  const one = c => typeof c === "string" ? c : String(c.secretNumber || c.code || c.pin || "");
   let t = Array.isArray(v) ? v.map(one).join("\n") : typeof v === "object" ? one(v) : String(v);
   if (typeof v === "string") { try { const j = JSON.parse(v); if (j && typeof j === "object") t = Array.isArray(j) ? j.map(one).join("\n") : one(j); } catch {} }
   return /^order[-_]/i.test(t.trim()) ? "" : t.trim();

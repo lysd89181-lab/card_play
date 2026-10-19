@@ -1085,6 +1085,13 @@ function pingAdmin(type, id){
 }
 
 /* supplier status refresh for this customer's orders that are waiting at the supplier */
+const rePinged = new Set();
+setInterval(() => {
+  if (!S.user || !S.settings?.supplier?.enabled) return;
+  const now = Date.now();
+  S.orders.filter(o => o.status === "pending" && !o.sup && !rePinged.has(o.id) && now - ms(o.createdAt) > 15000 && now - ms(o.createdAt) < 30*60*1000)
+    .slice(0, 2).forEach(o => { rePinged.add(o.id); pingAdmin("orders", o.id); });
+}, 10000);
 let supPollT = 0;
 setInterval(() => {
   const u = S.settings?.push?.worker; if (!u || !S.user) return;
