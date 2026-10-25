@@ -485,6 +485,7 @@ orders(){
       ${o.sup.raw?`<details style="margin-top:4px"><summary class="m" style="cursor:pointer">رد المزوّد</summary><div class="m num" style="direction:ltr;text-align:left;word-break:break-all;font-size:11.5px">${o.sup.http?`HTTP ${esc(o.sup.http)} · `:""}${esc(o.sup.raw)}</div></details>`:""}`:""}
       <div class="acts">
         ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed" || o.sup.state==="test") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
+        ${o.sup && ["failed","refunded"].includes(o.sup.state) && supLinked(o) ? `<button class="btn btn-o" onclick="supProbe('${o.id}',this)">🔍 فحص الربط</button>`:""}
         ${o.status==="pending"?`<button class="btn btn-o" onclick="oProc('${o.id}')">جاري التنفيذ</button>`:""}
         ${o.status!=="cancelled"?`<button class="btn btn-ok" onclick="oDone('${o.id}')">${o.status==="done"?"تعديل التسليم":"تم التنفيذ"}</button>`:""}
         ${o.status!=="cancelled"?`<button class="btn btn-x" onclick="oCancel('${o.id}')">إلغاء واسترجاع</button>`:""}
@@ -719,6 +720,16 @@ const supLinked = o => !!D.products.find(x=>x.id===o.productId)?.options?.[o.opt
 window.supExec = (id, btn) => { if (confirm("إرسال الطلب للمزوّد للتنفيذ؟ (يتخصم من رصيدك عند المزوّد)")) busy(btn, async () => {
   const r = await api("sup_exec", { id, manual:true });
   if (r.state === "done") toast("تم التنفيذ ✓","s"); else if (r.state === "sent") toast("أُرسل للمزوّد ✓ بانتظار التنفيذ","s"); else toast(r.err || "ما تمش التنفيذ","e"); }); };
+window.supProbe = (id, btn) => busy(btn, async () => {
+  const o = D.orders.find(x=>x.id===id); const p = D.products.find(x=>x.id===o.productId); const link = p?.options?.[o.optionIndex]?.sup || {};
+  const r = await api("sup_probe", { sid:String(link.id||"") });
+  const pre = t => `<div class="m num" style="direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:11.5px;background:rgba(0,0,0,.25);padding:8px;border-radius:10px">${esc(t)}</div>`;
+  openSheet(`<h3>فحص الربط<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <div class="sec" style="margin-top:0">الربط عندنا</div>${pre(JSON.stringify({ product:p?.name, needsInput:p?.needsInput, input:o.input, link }, null, 1))}
+    <div class="sec">رد المزوّد على الطلب</div>${pre(`HTTP ${o.sup.http||"?"}\n${o.sup.raw||o.sup.err||""}`)}
+    <div class="sec">المنتج عند المزوّد</div>${r.found ? `<div class="m">📁 ${esc(r.where)}</div>${pre(JSON.stringify(r.norm, null, 1))}${pre(r.raw)}` : `<div class="m" style="color:var(--err)">المنتج رقم ${esc(link.id||"—")} مش موجود في قائمة المزوّد</div>`}
+    <p class="m" style="margin-top:10px;color:var(--muted)">صوّر الصفحة هذي وابعتها للدعم الفني.</p>`);
+});
 window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
 const autoTried = new Set();
 setInterval(() => { if (!auth.currentUser || !D.settings?.supplier?.enabled || !can("orders")) return;

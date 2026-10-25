@@ -73,6 +73,7 @@ export default {
       if (a === "mig_run") { if (!who.owner) need("__owner"); return json({ ok: true, mig: await migrateStep(ctx) }); }
 
       if (a === "sup_products") { need("products"); return json({ ok: true, products: flattenTree(await supTree(ctx)) }); }
+      if (a === "sup_probe") { need("orders"); return json({ ok: true, ...(await supProbe(ctx, String(body.sid || ""))) }); }
       if (a === "sup_tree") { need("products"); return json({ ok: true, tree: await supTree(ctx) }); }
       if (a === "sup_balance") {
         if (!who.can("settings") && !who.can("products")) need("settings");
@@ -655,6 +656,19 @@ async function supTree(ctx) {
     })).filter(sc => sc.products.length)
   })).filter(c => c.products.length || c.subs.length);
 }
+// the supplier's own record for one product (to check a link)
+async function supProbe(ctx, sid) {
+  const r = await lp(ctx, "GET", "/digital-products/clone");
+  const arr = Array.isArray(r.data) ? r.data : (Array.isArray(r.data?.data) ? r.data.data : []);
+  for (const c of arr) {
+    const subs = c.subCategories || c.sub_categories || [];
+    for (const [where, list] of [[c.name, c.products || []], ...subs.map(sc => [c.name + " › " + sc.name, sc.products || []])]) {
+      const p = list.find(x => String(x.id) === sid);
+      if (p) return { found: true, where, norm: normProduct(p), raw: JSON.stringify(p).slice(0, 3000) };
+    }
+  }
+  return { found: false, http: r.status };
+}
 function flattenTree(tree) {
   const out = [];
   tree.forEach(c => { c.products.forEach(p => out.push(p)); c.subs.forEach(sc => sc.products.forEach(p => out.push(p))); });
@@ -803,7 +817,7 @@ function failKind(r) {
   if (r.status === 400 && !unavailableMsg(r)) return "balance";
   return "reject";
 }
-const unavailableMsg = r => /not\s*(found|available|exist)|unavailable|out\s*of\s*stock|stock|disabled|inactive|غير\s*(متوفر|متاح|موجود|مفعل)|نف[ذد]|انتهت|منتهي/i.test(supMessage(r)) || (r.status === 404);
+const unavailableMsg = r => /not\s*available|unavailable|out\s*of\s*stock|no\s*stock|sold\s*out|غير\s*(متوفر|متاح)|نف[ذد]ت?\s*(الكمية|الكميه)?/i.test(supMessage(r));
 // hide one package from the store (it comes back when the supplier lists it as available again)
 async function markOff(ctx, pid, idx, by) {
   for (let i = 0; i < 3; i++) {
