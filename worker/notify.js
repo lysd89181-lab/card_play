@@ -13,7 +13,7 @@ const PUBLIC_COLS = ["products", "categories", "banners", "settings"];
 let cached = { token: "", exp: 0 };
 let schemaReady = false;
 const JW = { keys: {}, exp: 0 };
-let pubMem = { at: 0, text: "" };
+let pubMem = { at: 0, text: "", etag: "" };
 
 class UErr extends Error {}
 const UE = m => { throw new UErr(m); };
@@ -29,7 +29,13 @@ export default {
       const ctx = makeCtx(env, req, ectx);
       const url = new URL(req.url);
       if (req.method === "GET") {
-        if (url.pathname === "/public") return raw(await publicText(ctx), { "Cache-Control": "public, max-age=15" });
+        if (url.pathname === "/public") {
+          // the browser keeps the last copy and only asks "did it change?" (one tiny read when it didn't)
+          const pub = await publicData(ctx, req.headers.get("If-None-Match") || "");
+          const h = { ...cors, "ETag": pub.etag, "Cache-Control": "no-cache" };
+          if (pub.same) return new Response(null, { status: 304, headers: h });
+          return new Response(pub.text, { headers: { ...h, "Content-Type": "application/json" } });
+        }
         if (url.pathname === "/status") return new Response(await statusPage(ctx), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
         return json({ ok: true, service: "cardplay", v: VERSION });
       }
@@ -199,20 +205,27 @@ async function adminOf(ctx, uid) {
 
 /* ================= public data (products, sections, banners, settings) ================= */
 // built once after each change and kept ready, so a visit costs one small read
-async function publicText(ctx) {
-  if (pubMem.text && Date.now() - pubMem.at < 10000) return pubMem.text;
-  const rows = (await ctx.db.prepare("SELECT k, v FROM meta WHERE k LIKE 'pub%' ORDER BY k").all()).results || [];
-  const head = rows.find(r => r.k === "pub");
-  let text = "";
-  if (head) {
-    const h = JSON.parse(head.v);
-    const parts = [];
-    for (let i = 0; i < h.n; i++) { const p = rows.find(r => r.k === "pub_" + i); if (!p) { parts.length = 0; break; } parts.push(p.v); }
-    if (parts.length === h.n) text = parts.join("");
+async function publicData(ctx, inm) {
+  const fresh = pubMem.text && Date.now() - pubMem.at < 10000;
+  if (!fresh) {
+    const head = await ctx.db.prepare("SELECT v FROM meta WHERE k = 'pub'").first();
+    const h = head ? JSON.parse(head.v) : null;
+    const etag = h ? `"p${h.at}"` : "";
+    if (h && inm && inm === etag) return { etag, same: true };
+    if (h && pubMem.etag === etag && pubMem.text) pubMem.at = Date.now();
+    else {
+      let text = "";
+      if (h) {
+        const keys = Array.from({ length: h.n }, (_, i) => "pub_" + i);
+        const rows = (await ctx.db.prepare("SELECT k, v FROM meta WHERE k IN (SELECT value FROM json_each(?1))").bind(JSON.stringify(keys)).all()).results || [];
+        const parts = keys.map(k => rows.find(r => r.k === k)?.v);
+        if (parts.every(x => typeof x === "string")) text = parts.join("");
+      }
+      pubMem = text ? { at: Date.now(), text, etag } : { at: Date.now(), ...(await buildPublic(ctx)) };
+    }
   }
-  if (!text) text = await buildPublic(ctx);
-  pubMem = { at: Date.now(), text };
-  return text;
+  if (inm && inm === pubMem.etag) return { etag: pubMem.etag, same: true };
+  return { etag: pubMem.etag, text: pubMem.text };
 }
 async function buildPublic(ctx) {
   const rows = (await ctx.db.prepare("SELECT col, id, data FROM docs WHERE col IN ('products', 'categories', 'banners', 'settings') AND del = 0").all()).results || [];
@@ -229,11 +242,12 @@ async function buildPublic(ctx) {
   const text = JSON.stringify(out);
   const CH = 1500000, n = Math.max(1, Math.ceil(text.length / CH)), st = [ctx.db.prepare("DELETE FROM meta WHERE k LIKE 'pub%'")];
   for (let i = 0; i < n; i++) st.push(ctx.db.prepare("INSERT INTO meta (k, v) VALUES (?1, ?2)").bind("pub_" + i, text.slice(i * CH, (i + 1) * CH)));
-  st.push(ctx.db.prepare("INSERT INTO meta (k, v) VALUES ('pub', ?1)").bind(JSON.stringify({ n, at: Date.now() })));
+  const at = Date.now();
+  st.push(ctx.db.prepare("INSERT INTO meta (k, v) VALUES ('pub', ?1)").bind(JSON.stringify({ n, at })));
   await ctx.db.batch(st);
-  return text;
+  return { text, etag: `"p${at}"` };
 }
-const pubDirty = ctx => { pubMem = { at: 0, text: "" }; return ctx.db.prepare("DELETE FROM meta WHERE k = 'pub'"); };
+const pubDirty = ctx => { pubMem = { at: 0, text: "", etag: "" }; return ctx.db.prepare("DELETE FROM meta WHERE k = 'pub'"); };
 
 /* ================= customer ================= */
 async function settingsOf(ctx) { return (await getD(ctx, "settings", "app"))?.data || {}; }

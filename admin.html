@@ -246,7 +246,7 @@ function fileToDataURL(file, maxW, maxH, q=0.82){
 /* ================= auth ================= */
 $("#lf").onsubmit = async e => { e.preventDefault(); $("#lErr").textContent=""; try{ await signInWithEmailAndPassword(auth,$("#lE").value.trim(),$("#lP").value); }catch(err){ $("#lErr").textContent="بيانات الدخول غير صحيحة"; } };
 $("#gB").onclick = async () => { const p=new GoogleAuthProvider(); try{ await signInWithPopup(auth,p);}catch(err){ if(err.code==="auth/popup-blocked") signInWithRedirect(auth,p); else $("#lErr").textContent="تعذر الدخول بـ Google"; } };
-$("#out").onclick = $("#out2").onclick = () => signOut(auth);
+$("#out").onclick = $("#out2").onclick = async () => { if (AS.uid) await kv.del("snap:" + AS.uid); signOut(auth); };
 
 const D = { cats:[], staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} };
 let stab = "wallets", stq = "", pq = "", pcf = "", ptf = "";
@@ -254,12 +254,32 @@ const selP = new Set();
 let unsubs = [], tab = "orders", ofil = "pending", tfil = "pending", kfil = "open", uq = "";
 const scr = id => document.querySelectorAll("section").forEach(s => s.classList.toggle("hidden", s.id!==id));
 
-const AS = { since:0, busy:false, T:0, gen:0, seen:new Map(), uid:"" };
+const AS = { since:0, busy:false, T:0, gen:0, seen:new Map(), uid:"", store:new Map(), quiet:false, saveT:0 };
+/* ---------- local copy of the panel data: opening the panel only fetches what changed since last time ---------- */
+const SNAP_V = 1;
+const kv = (() => { let p;
+  const open = () => p ||= new Promise((res, rej) => { const r = indexedDB.open("cp_admin", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const run = async (mode, fn) => { const h = await open(); return new Promise((res, rej) => { const t = h.transaction("kv", mode); const q = fn(t.objectStore("kv")); t.oncomplete = () => res(q?.result); t.onerror = () => rej(t.error); }); };
+  return { get: k => run("readonly", st => st.get(k)).catch(() => null), set: (k, v) => run("readwrite", st => st.put(v, k)).catch(() => null), del: k => run("readwrite", st => st.delete(k)).catch(() => null) }; })();
+function snapSave(){ clearTimeout(AS.saveT); const uid = AS.uid, gen = AS.gen; AS.saveT = setTimeout(() => {
+  if (gen !== AS.gen || !uid || !AS.since) return;
+  // keep the newest history only, everything else complete
+  const lim = { orders:300, topups:200, tickets:300 }, by = {};
+  const docs = [...AS.store.values()].filter(d => { if (!lim[d.c]) return true; (by[d.c] ||= []).push(d); return false; });
+  for (const c in by) docs.push(...by[c].sort((a,b) => ms(b.d.createdAt) - ms(a.d.createdAt)).slice(0, lim[c]));
+  kv.set("snap:" + uid, { v:SNAP_V, since:AS.since, at:Date.now(), docs }); }, 3000); }
+async function snapLoad(uid){
+  const snap = await kv.get("snap:" + uid);
+  if (!snap || snap.v !== SNAP_V || !snap.since || Date.now() - snap.at > 3*86400000) return false;
+  applyDocs(snap.docs, true); AS.since = snap.since; AS.quiet = true;
+  return true;
+}
 const COLMAP = { orders:"orders", topups:"topups", tickets:"tickets", products:"products", banners:"banners", categories:"cats", users:"users" };
 function applyDocs(docs, initial){
   let changed = false, permsChanged = false; const fresh = [];
   for (const d of docs) {
     const key = d.c + "/" + d.i;
+    if (d.c !== "adminTokens") { if (d.x) AS.store.delete(key); else AS.store.set(key, d); }
     if (AS.seen.get(key) === d.u) continue;
     AS.seen.set(key, d.u); changed = true;
     if (d.c === "settings") { if (d.i === "app") { D.settings = d.x ? {} : d.d; maybeRefreshFcm(); } continue; }
@@ -295,9 +315,10 @@ async function adminPull(){
     while (more && guard++ < 15) {
       const j = await api("admin_sync", { since: AS.since ? AS.since - (overlap ? 5000 : 0) : 0 });
       if (gen !== AS.gen) return;
-      if (applyDocs(j.docs || [], !AS.since)) AS.idle = 0; else AS.idle = (AS.idle || 0) + 1;
+      if (applyDocs(j.docs || [], !AS.since || AS.quiet)) { AS.idle = 0; snapSave(); } else AS.idle = (AS.idle || 0) + 1;
       AS.since = j.now; more = !!j.more; overlap = false;
     }
+    AS.quiet = false;
   } catch (e) { console.error(e); }
   finally { AS.busy = false; }
 }
@@ -306,7 +327,7 @@ async function adminKick(){ AS.idle = 0; clearTimeout(AS.T); await adminPull(); 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && auth.currentUser && AS.since) adminKick(); });
 
 onAuthStateChanged(auth, async u => {
-  clearTimeout(AS.T); AS.gen++; AS.since = 0; AS.seen = new Map(); AS.uid = u?.uid || "";
+  clearTimeout(AS.T); AS.gen++; AS.since = 0; AS.seen = new Map(); AS.store = new Map(); AS.quiet = false; AS.uid = u?.uid || "";
   Object.assign(D, { cats:[], staff:[], orders:[], topups:[], tickets:[], products:[], banners:[], users:[], settings:{} });
   if (!u) return scr("login");
   let me = null;
@@ -316,6 +337,7 @@ onAuthStateChanged(auth, async u => {
   if (!allowedTabs().includes(tab)) tab = "orders";
   $("#who").textContent = (ROLE==="staff" ? "موظف · " : "") + (u.email || "");
   scr("panel");
+  if (await snapLoad(u.uid)) draw();
   await adminPull(); adminLoop();
   if (ROLE === "owner") migWatch(me.mig);
   setTimeout(supAvailAuto, 4000);
@@ -523,7 +545,7 @@ products(){
     <button class="btn btn-p" onclick="bulkMove()">📁 نقل لقسم</button><button class="btn btn-o" onclick="bulkType()">🏷️ تغيير التصنيف</button>
     <button class="btn btn-o" onclick="bulkVis(false)">إخفاء</button><button class="btn btn-o" onclick="bulkVis(true)">إظهار</button>
     <button class="btn btn-x" onclick="bulkDel()">حذف</button><button class="btn btn-o" onclick="selP.clear();draw()">إلغاء التحديد</button></div>` : ""}`;
-  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button><button class="btn btn-o" onclick="supAvailBtn(this)">🔄 تحديث التوفر من المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
+  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button><button class="btn btn-o" onclick="supAvailBtn(this)">🔄 تحديث التوفر من المزوّد</button><button class="btn btn-o" onclick="supBroken(this)">🔗 روابط تحتاج مراجعة</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${D.products.length ? bar : ""}
   ${list.length ? list.map(p => `<div class="card ${selP.has(p.id)?"sel":""}"><div class="top"><input type="checkbox" class="psel" data-p="${p.id}" ${selP.has(p.id)?"checked":""}>${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
@@ -1044,6 +1066,36 @@ async function supAvailSync(manual){
   return off + on + fixed;
 }
 window.supAvailBtn = btn => busy(btn, () => supAvailSync(true));
+// packages whose supplier number no longer exists: suggestions to re-link in one tap
+const wordsOf = t => String(t || "").toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+window.supBroken = btn => busy(btn, async () => {
+  const tree = await loadTree(true); const all = [];
+  tree.forEach(c => { c.products.forEach(x => all.push({ x, where:c.name })); c.subs.forEach(sc => sc.products.forEach(x => all.push({ x, where:c.name+" › "+sc.name }))); });
+  if (all.length < 10) throw new Error("قائمة المزوّد ما وصلتش، حاول بعد شوية");
+  const live = new Set(all.map(a => a.x.id)), aw = all.map(a => ({ ...a, w:wordsOf(a.x.name) }));
+  const broken = []; D.products.forEach(p => (p.options||[]).forEach((o, idx) => { if (o.sup?.id && !live.has(o.sup.id)) broken.push({ p, o, idx }); }));
+  if (!broken.length) return toast("كل الروابط سليمة ✓","s");
+  const near = sup => { const want = wordsOf(sup.name), nums = want.filter(w => /^\d+$/.test(w));
+    return aw.map(a => ({ ...a, score: nums.every(n => a.w.includes(n)) ? want.filter(t => a.w.includes(t)).length + (a.x.type === sup.type ? .5 : 0) : 0 }))
+      .filter(a => a.score >= Math.max(1, Math.ceil(want.length / 2))).sort((a,b) => b.score - a.score).slice(0, 3); };
+  const list = broken.slice(0, 60).map(b => ({ ...b, c: near(b.o.sup) }));
+  openSheet(`<h3>روابط تحتاج مراجعة (${broken.length})<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
+    <p class="m" style="margin-bottom:10px;color:var(--muted)">المزوّد غيّر أرقام المنتجات هذي. اختار المنتج الصح لكل باقة.</p>
+    ${list.map((b, i) => `<div class="card" style="padding:10px;margin-bottom:10px" id="bk${i}"><b class="h" style="font-size:14px">${esc(b.p.name)} — ${iso(esc(b.o.label))}</b>
+      <div class="m">كان مربوط بـ: ${esc(b.o.sup.name||"")} (${esc(b.o.sup.cost)} ${esc(b.o.sup.cur||"")})</div>
+      ${b.c.length ? b.c.map((a, j) => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><span class="m" style="flex:1">${esc(a.x.name)}<br><small>📁 ${esc(a.where)} · ${esc(a.x.price)} ${esc(a.x.cur)}${a.x.available?"":" · غير متوفر"}</small></span><button class="btn btn-p" data-bk="${i}:${j}">ربط</button></div>`).join("")
+        : `<div class="m" style="color:var(--warn);margin-top:6px">ما لقيناش اقتراح — اربطها من تعديل المنتج</div>`}</div>`).join("")}
+    ${broken.length > 60 ? `<p class="m">عرضنا أول 60 — بعد ما تخلصهم عاود افتح الشاشة.</p>` : ""}`);
+  document.querySelectorAll("[data-bk]").forEach(bt => bt.onclick = () => busy(bt, async () => {
+    const [i, j] = bt.dataset.bk.split(":").map(Number), b = list[i], a = b.c[j].x, s0 = b.o.sup;
+    if (s0.cost > 0 && (a.cur||"") === (s0.cur||"") && a.price > s0.cost * 1.15 && !confirm("تكلفته أغلى من القديم بأكثر من 15% — راجع السعر بعدين. نكمّل؟")) return;
+    const p = D.products.find(x => x.id === b.p.id) || b.p;
+    const options = p.options.map((op, k) => { if (k !== b.idx) return op; const { off:_a, offBy:_b, offAt:_c, ...rest } = op; return { ...rest, sup:{ ...s0, id:a.id, type:a.type, key:a.key||s0.key||"", name:a.name, cost:a.price, cur:a.cur, relinkedAt:Date.now(), oldId:String(s0.id) } }; });
+    await updateDoc(doc(db,"products",p.id), { options, updatedAt:serverTimestamp() });
+    p.options = options;
+    const box = document.getElementById("bk"+i); if (box) box.innerHTML = `<b class="h" style="font-size:14px">${esc(b.p.name)} — ${iso(esc(b.o.label))}</b><div class="m" style="color:var(--ok)">✅ اتربطت بـ ${esc(a.name)}</div>`;
+  }));
+});
 function supAvailAuto(){ let t = 0; try { t = +localStorage.getItem("cp_avail_at") || 0; } catch {} if (Date.now() - t > 30*60*1000) supAvailSync(false).catch(e => console.warn(e)); }
 setInterval(() => { if (auth.currentUser && !document.hidden) supAvailAuto(); }, 5*60*1000);
 window.supReprice = async () => {
