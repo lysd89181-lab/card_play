@@ -1080,7 +1080,7 @@ window.supBroken = btn => busy(btn, async () => {
   const near = sup => { const want = wordsOf(sup.name), nums = want.filter(w => /^\d+$/.test(w));
     return aw.map(a => { const shared = want.filter(t => a.w.includes(t)).length;
         return { ...a, shared, full: shared === want.length || a.w.every(t => want.includes(t)), score: nums.every(n => a.w.includes(n)) ? shared + (a.x.type === sup.type ? .5 : 0) : 0 }; })
-      .filter(a => a.score >= Math.max(1, Math.ceil(want.length / 2))).sort((a,b) => b.score - a.score).slice(0, 3); };
+      .filter(a => a.x.available && a.score >= Math.max(1, Math.ceil(want.length / 2))).sort((a,b) => b.score - a.score).slice(0, 3); };
   // "sure" = clearly the same item: same words, same numbers, sensible cost, nothing equally close
   const list = broken.map(b => { const c = near(b.o.sup); const t = c[0];
     const sure = !!t && t.full && t.x.available && priceOk(b.o.sup, t.x) && !(c[1] && c[1].score === t.score);
