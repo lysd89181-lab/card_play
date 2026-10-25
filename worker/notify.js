@@ -12,6 +12,7 @@ const PROJECT_DEF = "cd-card-87365";
 const PUBLIC_COLS = ["products", "categories", "banners", "settings"];
 let cached = { token: "", exp: 0 };
 let schemaReady = false;
+const OPEN_WHERE = "del = 0 AND json_extract(data, '$.status') IN ('pending', 'processing')";
 const JW = { keys: {}, exp: 0 };
 let pubMem = { at: 0, text: "", etag: "" };
 
@@ -118,10 +119,16 @@ async function schema(env) {
   if (schemaReady) return;
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS docs (col TEXT NOT NULL, id TEXT NOT NULL, uid TEXT, data TEXT NOT NULL, v INTEGER NOT NULL DEFAULT 1, created INTEGER, updated INTEGER NOT NULL, del INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (col, id))"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS docs_col_upd ON docs (col, updated)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS docs_col_created ON docs (col, created)"),
+    // every index costs extra written rows on each change, so only the ones that pay for themselves:
+    //  - updated: "what changed since" for the panel
+    //  - uid+col: a customer's own orders/top-ups (doesn't change on updates)
+    //  - open orders only (partial): background jobs read just the few orders still in progress
+    env.DB.prepare("DROP INDEX IF EXISTS docs_col_upd"),
+    env.DB.prepare("DROP INDEX IF EXISTS docs_col_created"),
+    env.DB.prepare("DROP INDEX IF EXISTS docs_uid"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS docs_upd ON docs (updated)"),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS docs_uid ON docs (uid, col, updated)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS docs_owner ON docs (uid, col)"),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS docs_open ON docs (col, updated) WHERE ${OPEN_WHERE}`),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS shots (id TEXT PRIMARY KEY, data TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
   ]);
@@ -272,7 +279,7 @@ async function userSync(ctx, user, body) {
   if (since > 0) {
     rows = (await ctx.db.prepare("SELECT col, id, data, updated, del FROM docs WHERE uid = ?1 AND col IN ('orders', 'topups', 'tickets') AND updated > ?2 ORDER BY updated LIMIT 300").bind(user.uid, since).all()).results || [];
   } else {
-    const q = col => ctx.db.prepare("SELECT col, id, data, updated, del FROM docs WHERE uid = ?1 AND col = ?2 AND del = 0 ORDER BY updated DESC LIMIT 200").bind(user.uid, col);
+    const q = col => ctx.db.prepare("SELECT col, id, data, updated, del FROM docs WHERE uid = ?1 AND col = ?2 AND del = 0 ORDER BY created DESC LIMIT 200").bind(user.uid, col);
     rows = (await ctx.db.batch([q("orders"), q("topups"), q("tickets")])).flatMap(r => r.results || []);
   }
   const meTxt = me && (!since || me.updated > since) ? JSON.stringify({ id: user.uid, ...me.data }) : "null";
@@ -908,6 +915,7 @@ async function markOff(ctx, pid, idx, by) {
 }
 
 /* ================= sync orders that are waiting at the supplier ================= */
+const checkedMem = new Map();
 const OK_ST = ["accept", "accepted", "complete", "completed", "done", "success", "successful", "delivered"];
 const BAD_ST = ["reject", "rejected", "cancel", "canceled", "cancelled", "fail", "failed", "refund", "refunded", "error"];
 async function syncOrders(ctx, ids, rateLimit) {
@@ -915,11 +923,11 @@ async function syncOrders(ctx, ids, rateLimit) {
   if (ids) {
     for (const id of ids) { const d = await getD(ctx, "orders", id); if (d) orders.push(d); }
   } else {
-    const rows = (await ctx.db.prepare("SELECT id, data, v FROM docs WHERE col = 'orders' AND del = 0 AND updated > ?1 AND json_extract(data, '$.status') = 'processing' LIMIT 60").bind(Date.now() - 3 * 86400000).all()).results || [];
+    const rows = (await ctx.db.prepare(`SELECT id, data, v FROM docs WHERE col = 'orders' AND ${OPEN_WHERE} AND updated > ?1 LIMIT 120`).bind(Date.now() - 3 * 86400000).all()).results || [];
     orders = rows.map(x => ({ id: x.id, v: x.v, data: JSON.parse(x.data) }));
   }
   orders = orders.filter(o => o.data.status === "processing" && o.data.sup?.state === "sent" && !o.data.sup?.sandbox);
-  if (rateLimit) orders = orders.filter(o => Date.now() - (Number(o.data.sup.checkedAt) || Date.parse(o.data.sup.checkedAt || 0) || 0) > 20000);
+  if (rateLimit) { orders = orders.filter(o => Date.now() - (checkedMem.get(o.id) || 0) > 20000); orders.forEach(o => checkedMem.set(o.id, Date.now())); if (checkedMem.size > 500) checkedMem.clear(); }
   if (!orders.length) return { checked: 0, updated: 0 };
 
   const seen = new Map();
@@ -940,14 +948,12 @@ async function syncOrders(ctx, ids, rateLimit) {
     if (m && OK_ST.includes(st) && /^[xX*\-\s]+$/.test(String(m.delivery_data || ""))) {
       await set({ sup: { ...s, state: "failed", err: "المزوّد رجّع كود تجريبي — راجع الطلب", checkedAt: now } }); updated++;
     } else if (m && OK_ST.includes(st) && s.type === "digital" && !deliveryText(m)) {
-      await set({ sup: { ...s, checkedAt: now } });
+      // accepted but the code isn't visible yet: nothing to save, check again next minute
     } else if (m && OK_ST.includes(st)) {
       await set({ status: "done", delivery: deliveryText(m) || "تم التنفيذ ✓", sup: { ...s, state: "done", checkedAt: now }, updatedAt: now }); updated++;
     } else if (m && BAD_ST.includes(st)) {
       await set({ sup: { ...s, state: "failed", err: "المزوّد رفض الطلب — ألغه من اللوحة لإرجاع المبلغ للزبون", checkedAt: now } }); updated++;
-    } else {
-      await set({ sup: { ...s, checkedAt: now } });
-    }
+    }   // still waiting: nothing written
   }
   return { checked: orders.length, updated };
 }
@@ -964,7 +970,7 @@ function deliveryText(m) {
 async function supplierJobs(ctx) {
   const st = await settingsOf(ctx);
   if (!st.supplier?.enabled) return;
-  const rows = (await ctx.db.prepare("SELECT id, data, created FROM docs WHERE col = 'orders' AND del = 0 AND updated > ?1 AND json_extract(data, '$.status') IN ('pending', 'processing') LIMIT 80").bind(Date.now() - 86400000).all()).results || [];
+  const rows = (await ctx.db.prepare(`SELECT id, data, created FROM docs WHERE col = 'orders' AND ${OPEN_WHERE} AND updated > ?1 LIMIT 80`).bind(Date.now() - 86400000).all()).results || [];
   const now = Date.now();
   const list = rows.map(r => ({ id: r.id, created: r.created, data: JSON.parse(r.data) }));
   // safety net: linked orders that were never sent (e.g. the first attempt was interrupted)
