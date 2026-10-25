@@ -711,7 +711,8 @@ async function loadPublic(){
     const r = await fetch(API + "/public"); const j = await r.json();
     if (!j.ok) throw new Error("public");
     const bySort = (a,b)=>(a.sort??999)-(b.sort??999);
-    S.products = (j.products||[]).sort(bySort); S.cats = (j.cats||[]).sort(bySort); S.banners = (j.banners||[]).sort(bySort);
+    // a product whose packages are all unavailable doesn't show at all
+    S.products = (j.products||[]).filter(p => !(p.options||[]).length || (p.options||[]).some(o => !o.off)).sort(bySort); S.cats = (j.cats||[]).sort(bySort); S.banners = (j.banners||[]).sort(bySort);
     S.settings = set(j.settings || {});
   } catch (e) { console.error(e); }
   S.ready.products = true; render();

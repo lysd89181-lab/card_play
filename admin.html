@@ -1075,26 +1075,53 @@ window.supBroken = btn => busy(btn, async () => {
   const live = new Set(all.map(a => a.x.id)), aw = all.map(a => ({ ...a, w:wordsOf(a.x.name) }));
   const broken = []; D.products.forEach(p => (p.options||[]).forEach((o, idx) => { if (o.sup?.id && !live.has(o.sup.id)) broken.push({ p, o, idx }); }));
   if (!broken.length) return toast("كل الروابط سليمة ✓","s");
+  const lyd = c => /رصيد|د\.?ل|lyd/i.test(c||"") ? "LYD" : (c||"");
+  const priceOk = (s0, a) => !(s0.cost > 0) || lyd(a.cur) !== lyd(s0.cur) || (a.price <= s0.cost * 1.15 && a.price >= s0.cost * 0.5);
   const near = sup => { const want = wordsOf(sup.name), nums = want.filter(w => /^\d+$/.test(w));
-    return aw.map(a => ({ ...a, score: nums.every(n => a.w.includes(n)) ? want.filter(t => a.w.includes(t)).length + (a.x.type === sup.type ? .5 : 0) : 0 }))
+    return aw.map(a => { const shared = want.filter(t => a.w.includes(t)).length;
+        return { ...a, shared, full: shared === want.length || a.w.every(t => want.includes(t)), score: nums.every(n => a.w.includes(n)) ? shared + (a.x.type === sup.type ? .5 : 0) : 0 }; })
       .filter(a => a.score >= Math.max(1, Math.ceil(want.length / 2))).sort((a,b) => b.score - a.score).slice(0, 3); };
-  const list = broken.slice(0, 60).map(b => ({ ...b, c: near(b.o.sup) }));
+  // "sure" = clearly the same item: same words, same numbers, sensible cost, nothing equally close
+  const list = broken.map(b => { const c = near(b.o.sup); const t = c[0];
+    const sure = !!t && t.full && t.x.available && priceOk(b.o.sup, t.x) && !(c[1] && c[1].score === t.score);
+    return { ...b, c, sure }; }).sort((a,b) => (b.sure - a.sure) || (b.c.length - a.c.length));
+  const newSup = (s0, a) => ({ ...s0, id:a.id, type:a.type, key:a.key||s0.key||"", name:a.name, cost:a.price, cur:a.cur, relinkedAt:Date.now(), oldId:String(s0.id) });
+  // apply many changes product by product (one write per product)
+  const apply = async (changes) => { const by = new Map();
+    changes.forEach(ch => { if (!by.has(ch.b.p.id)) by.set(ch.b.p.id, []); by.get(ch.b.p.id).push(ch); });
+    const bt = writeBatch(db);
+    by.forEach((chs, pid) => { const p = D.products.find(x => x.id === pid); if (!p) return;
+      const options = p.options.map((op, k) => { const ch = chs.find(c => c.b.idx === k); if (!ch) return op;
+        if (ch.hide) return { ...op, off:true, offBy:"gone", offAt:Date.now() };
+        const { off:_a, offBy:_b, offAt:_c, ...rest } = op; return { ...rest, sup:newSup(op.sup, ch.a) }; });
+      p.options = options; bt.update(doc(db,"products",pid), { options, updatedAt:serverTimestamp() }); });
+    await bt.commit(); };
+  const sureN = list.filter(b => b.sure).length, noneN = list.filter(b => !b.c.length && !b.o.off).length, offN = list.filter(b => b.o.off).length;
+  const SHOW = 80;
   openSheet(`<h3>روابط تحتاج مراجعة (${broken.length})<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
-    <p class="m" style="margin-bottom:10px;color:var(--muted)">المزوّد غيّر أرقام المنتجات هذي. اختار المنتج الصح لكل باقة.</p>
-    ${list.map((b, i) => `<div class="card" style="padding:10px;margin-bottom:10px" id="bk${i}"><b class="h" style="font-size:14px">${esc(b.p.name)} — ${iso(esc(b.o.label))}</b>
-      <div class="m">كان مربوط بـ: ${esc(b.o.sup.name||"")} (${esc(b.o.sup.cost)} ${esc(b.o.sup.cur||"")})</div>
-      ${b.c.length ? b.c.map((a, j) => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><span class="m" style="flex:1">${esc(a.x.name)}<br><small>📁 ${esc(a.where)} · ${esc(a.x.price)} ${esc(a.x.cur)}${a.x.available?"":" · غير متوفر"}</small></span><button class="btn btn-p" data-bk="${i}:${j}">ربط</button></div>`).join("")
-        : `<div class="m" style="color:var(--warn);margin-top:6px">ما لقيناش اقتراح — اربطها من تعديل المنتج</div>`}</div>`).join("")}
-    ${broken.length > 60 ? `<p class="m">عرضنا أول 60 — بعد ما تخلصهم عاود افتح الشاشة.</p>` : ""}`);
+    <p class="m" style="margin-bottom:10px;color:var(--muted)">المزوّد غيّر أرقام أو أسماء المنتجات هذي، أو وقّف بيعها. ${offN ? `${offN} منها مخفية من المتجر حالياً.` : ""}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${sureN ? `<button class="btn btn-p" id="bkSure">✅ ربط المؤكدة (${sureN})</button>` : ""}
+      ${noneN ? `<button class="btn btn-o" id="bkNone">🙈 إخفاء اللي بدون اقتراح (${noneN})</button>` : ""}</div>
+    ${list.slice(0, SHOW).map((b, i) => `<div class="card" style="padding:10px;margin-bottom:10px" id="bk${i}"><b class="h" style="font-size:14px">${esc(b.p.name)}${b.o.label && b.o.label !== b.p.name ? ` — ${iso(esc(b.o.label))}` : ""}</b>
+      <div class="m">كان مربوط بـ: ${esc(b.o.sup.name||"")} (${esc(b.o.sup.cost)} ${esc(b.o.sup.cur||"")})${b.o.off ? ` · <span style="color:var(--warn)">🙈 مخفية من المتجر</span>` : ""}</div>
+      ${b.c.map((a, j) => `<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><span class="m" style="flex:1">${j===0&&b.sure?"✅ ":""}${esc(a.x.name)}<br><small>📁 ${esc(a.where)} · ${esc(a.x.price)} ${esc(a.x.cur)}${a.x.available?"":" · غير متوفر"}</small></span><button class="btn btn-p" data-bk="${i}:${j}">ربط</button></div>`).join("")}
+      ${!b.c.length ? `<div class="m" style="color:var(--warn);margin-top:6px">ما لقيناش اقتراح — غالباً المزوّد وقّف بيعه</div>` : ""}
+      ${!b.o.off ? `<button class="btn btn-o" style="margin-top:8px" data-bh="${i}">🙈 إخفاء من المتجر</button>` : ""}</div>`).join("")}
+    ${list.length > SHOW ? `<p class="m">عرضنا أول ${SHOW} — بعد ما تخلصهم عاود افتح الشاشة.</p>` : ""}`);
+  const done = (i, html) => { const box = document.getElementById("bk"+i); if (box) box.innerHTML = `<b class="h" style="font-size:14px">${esc(list[i].p.name)}</b><div class="m">${html}</div>`; };
   document.querySelectorAll("[data-bk]").forEach(bt => bt.onclick = () => busy(bt, async () => {
-    const [i, j] = bt.dataset.bk.split(":").map(Number), b = list[i], a = b.c[j].x, s0 = b.o.sup;
-    if (s0.cost > 0 && (a.cur||"") === (s0.cur||"") && a.price > s0.cost * 1.15 && !confirm("تكلفته أغلى من القديم بأكثر من 15% — راجع السعر بعدين. نكمّل؟")) return;
-    const p = D.products.find(x => x.id === b.p.id) || b.p;
-    const options = p.options.map((op, k) => { if (k !== b.idx) return op; const { off:_a, offBy:_b, offAt:_c, ...rest } = op; return { ...rest, sup:{ ...s0, id:a.id, type:a.type, key:a.key||s0.key||"", name:a.name, cost:a.price, cur:a.cur, relinkedAt:Date.now(), oldId:String(s0.id) } }; });
-    await updateDoc(doc(db,"products",p.id), { options, updatedAt:serverTimestamp() });
-    p.options = options;
-    const box = document.getElementById("bk"+i); if (box) box.innerHTML = `<b class="h" style="font-size:14px">${esc(b.p.name)} — ${iso(esc(b.o.label))}</b><div class="m" style="color:var(--ok)">✅ اتربطت بـ ${esc(a.name)}</div>`;
-  }));
+    const [i, j] = bt.dataset.bk.split(":").map(Number), b = list[i], a = b.c[j].x;
+    if (!priceOk(b.o.sup, a) && !confirm("تكلفته مختلفة واجد على القديم — راجع السعر بعدين. نكمّل؟")) return;
+    await apply([{ b, a }]); done(i, `<span style="color:var(--ok)">✅ اتربطت بـ ${esc(a.name)}</span>`); }));
+  document.querySelectorAll("[data-bh]").forEach(bt => bt.onclick = () => busy(bt, async () => {
+    const i = +bt.dataset.bh; await apply([{ b:list[i], hide:true }]); done(i, `<span style="color:var(--warn)">🙈 اتخفت من المتجر</span>`); }));
+  $("#bkSure") && ($("#bkSure").onclick = () => busy($("#bkSure"), async () => {
+    const sel = list.filter(b => b.sure); if (!confirm(`ربط ${sel.length} باقة بالاقتراح المؤكد؟`)) return;
+    await apply(sel.map(b => ({ b, a:b.c[0].x }))); closeSheet(); toast(`تم ربط ${sel.length} باقة ✓`,"s"); }));
+  $("#bkNone") && ($("#bkNone").onclick = () => busy($("#bkNone"), async () => {
+    const sel = list.filter(b => !b.c.length && !b.o.off); if (!confirm(`إخفاء ${sel.length} باقة من المتجر؟ (ترجع لما تربطها)`)) return;
+    await apply(sel.map(b => ({ b, hide:true }))); closeSheet(); toast(`تم إخفاء ${sel.length} باقة ✓`,"s"); }));
 });
 function supAvailAuto(){ let t = 0; try { t = +localStorage.getItem("cp_avail_at") || 0; } catch {} if (Date.now() - t > 30*60*1000) supAvailSync(false).catch(e => console.warn(e)); }
 setInterval(() => { if (auth.currentUser && !document.hidden) supAvailAuto(); }, 5*60*1000);
