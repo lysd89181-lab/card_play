@@ -722,12 +722,14 @@ window.supExec = (id, btn) => { if (confirm("إرسال الطلب للمزوّ�
   if (r.state === "done") toast("تم التنفيذ ✓","s"); else if (r.state === "sent") toast("أُرسل للمزوّد ✓ بانتظار التنفيذ","s"); else toast(r.err || "ما تمش التنفيذ","e"); }); };
 window.supProbe = (id, btn) => busy(btn, async () => {
   const o = D.orders.find(x=>x.id===id); const p = D.products.find(x=>x.id===o.productId); const link = p?.options?.[o.optionIndex]?.sup || {};
-  const r = await api("sup_probe", { sid:String(link.id||"") });
+  const r = await api("sup_probe", { sid:String(link.id||""), name:link.name||"", type:link.type||"", cost:link.cost||0 });
   const pre = t => `<div class="m num" style="direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:11.5px;background:rgba(0,0,0,.25);padding:8px;border-radius:10px">${esc(t)}</div>`;
   openSheet(`<h3>فحص الربط<button class="btn btn-o" onclick="closeSheet()">✕</button></h3>
     <div class="sec" style="margin-top:0">الربط عندنا</div>${pre(JSON.stringify({ product:p?.name, needsInput:p?.needsInput, input:o.input, link }, null, 1))}
     <div class="sec">رد المزوّد على الطلب</div>${pre(`HTTP ${o.sup.http||"?"}\n${o.sup.raw||o.sup.err||""}`)}
-    <div class="sec">المنتج عند المزوّد</div>${r.found ? `<div class="m">📁 ${esc(r.where)}</div>${pre(JSON.stringify(r.norm, null, 1))}${pre(r.raw)}` : `<div class="m" style="color:var(--err)">المنتج رقم ${esc(link.id||"—")} مش موجود في قائمة المزوّد</div>`}
+    <div class="sec">المنتج عند المزوّد</div>${r.found ? `<div class="m">📁 ${esc(r.where)}</div>${pre(JSON.stringify(r.norm, null, 1))}${pre(r.raw)}` : `<div class="m" style="color:var(--err)">المنتج رقم ${esc(link.id||"—")} مش موجود في قائمة المزوّد</div>
+      ${r.byName?.match ? `<div class="m" style="color:var(--ok);margin-top:6px">✅ لقيناه بنفس الاسم برقم جديد: ${esc(r.byName.match.id)} — يتصلح بروحه مع أول طلب، أو اضغط «🔄 تحديث التوفر من المزوّد» في المنتجات</div>${pre(JSON.stringify(r.byName.match, null, 1))}`
+        : (r.byName?.list||[]).length ? `<div class="m" style="margin-top:6px">منتجات بأسماء قريبة:</div>${pre(JSON.stringify(r.byName.list, null, 1))}` : ""}`}
     <p class="m" style="margin-top:10px;color:var(--muted)">صوّر الصفحة هذي وابعتها للدعم الفني.</p>`);
 });
 window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
@@ -1002,10 +1004,20 @@ async function supAvailSync(manual){
   const live = new Map(); tree.forEach(c => { c.products.forEach(x => live.set(x.id, x)); c.subs.forEach(sc => sc.products.forEach(x => live.set(x.id, x))); });
   const ids = linked.flatMap(p => p.options.filter(o => o.sup?.id).map(o => o.sup.id));
   // safety: if the supplier list looks broken, change nothing
-  if (live.size < 10 || ids.filter(i => live.has(i)).length < ids.length * 0.5) { if (manual) throw new Error("قائمة المزوّد ما وصلتش كاملة، حاول بعد شوية"); return 0; }
-  const now = Date.now(), b = writeBatch(db); let off = 0, on = 0;
+  const nameKey = t => String(t || "").toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[\s\-_–—.,:()/]+/g, "").trim();
+  const byName = new Map(); live.forEach(x => { const k = nameKey(x.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(x); });
+  const relinkOf = s => { let c = (byName.get(nameKey(s.name)) || []).filter(x => x.available && x.price > 0);
+    if (s.type) { const t = c.filter(x => x.type === s.type); if (t.length) c = t; }
+    if (c.length > 1 && s.cost > 0) { c = [...c].sort((a,b) => Math.abs(a.price-s.cost) - Math.abs(b.price-s.cost)); if (Math.abs(c[0].price-s.cost) === Math.abs(c[1].price-s.cost)) return null; c = [c[0]]; }
+    const x = c.length === 1 ? c[0] : null;
+    if (!x || (s.cost > 0 && (x.cur||"") === (s.cur||"") && x.price > s.cost * 1.15)) return null;
+    return { ...s, id:x.id, type:x.type, key:x.key || s.key || "", name:x.name, cost:x.price, cur:x.cur, relinkedAt:Date.now(), oldId:String(s.id) }; };
+  const sups = linked.flatMap(p => p.options.filter(o => o.sup?.id).map(o => o.sup));
+  if (live.size < 10 || sups.filter(x => live.has(x.id) || relinkOf(x)).length < sups.length * 0.5) { if (manual) throw new Error("قائمة المزوّد ما وصلتش كاملة، حاول بعد شوية"); return 0; }
+  const now = Date.now(), b = writeBatch(db); let off = 0, on = 0, fixed = 0;
   linked.forEach(p => { let ch = false;
     const options = p.options.map(o => { if (!o.sup?.id) return o;
+      if (!live.has(o.sup.id)) { const nl = relinkOf(o.sup); if (nl) { ch = true; fixed++; const { off:_a, offBy:_b, offAt:_c, ...rest } = o; return { ...rest, sup:nl }; } }
       const x = live.get(o.sup.id), na = !x || !x.available || !(x.price > 0);
       if (na && !o.off) { ch = true; off++; return { ...o, off:true, offBy:"list", offAt:now }; }
       // a package hidden after a failed order stays hidden for 6 hours even if the list says it's back
@@ -1014,8 +1026,8 @@ async function supAvailSync(manual){
     if (ch) b.update(doc(db,"products",p.id), { options, updatedAt:serverTimestamp() }); });
   await b.commit();
   try { localStorage.setItem("cp_avail_at", String(now)); } catch {}
-  if (manual) toast(off || on ? `تم: ${off} باقة اتخفت · ${on} رجعت ✓` : "كل الباقات محدّثة ✓", "s");
-  return off + on;
+  if (manual) toast(off || on || fixed ? `تم: ${fixed} ربط اتصلح · ${off} باقة اتخفت · ${on} رجعت ✓` : "كل الباقات محدّثة ✓", "s");
+  return off + on + fixed;
 }
 window.supAvailBtn = btn => busy(btn, () => supAvailSync(true));
 function supAvailAuto(){ let t = 0; try { t = +localStorage.getItem("cp_avail_at") || 0; } catch {} if (Date.now() - t > 30*60*1000) supAvailSync(false).catch(e => console.warn(e)); }

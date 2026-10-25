@@ -73,7 +73,7 @@ export default {
       if (a === "mig_run") { if (!who.owner) need("__owner"); return json({ ok: true, mig: await migrateStep(ctx) }); }
 
       if (a === "sup_products") { need("products"); return json({ ok: true, products: flattenTree(await supTree(ctx)) }); }
-      if (a === "sup_probe") { need("orders"); return json({ ok: true, ...(await supProbe(ctx, String(body.sid || ""))) }); }
+      if (a === "sup_probe") { need("orders"); const r1 = await supProbe(ctx, String(body.sid || "")); return json({ ok: true, ...r1, ...(r1.found ? {} : { byName: await supProbeByName(ctx, { id: body.sid, name: body.name, type: body.type, cost: Number(body.cost) || 0 }) }) }); }
       if (a === "sup_tree") { need("products"); return json({ ok: true, tree: await supTree(ctx) }); }
       if (a === "sup_balance") {
         if (!who.can("settings") && !who.can("products")) need("settings");
@@ -669,6 +669,10 @@ async function supProbe(ctx, sid) {
   }
   return { found: false, http: r.status };
 }
+async function supProbeByName(ctx, link) {
+  const f = findByName(await supTree(ctx), link);
+  return { match: f.match || null, list: (f.list || []).slice(0, 5) };
+}
 function flattenTree(tree) {
   const out = [];
   tree.forEach(c => { c.products.forEach(p => out.push(p)); c.subs.forEach(sc => sc.products.forEach(p => out.push(p))); });
@@ -753,14 +757,15 @@ async function execOrder(ctx, id, manual, supSettings) {
 
   const input = String(o.input || "");
   const fake = v => /^[xX*\-\s]+$/.test(String(v || ""));
-  const testDone = async (type) => { await set({ sup: { state: "test", id: link.id, type, uuid, sandbox: true, err: "🧪 تجربة ناجحة — الطلب ما اتنفذش فعلياً (وضع التجربة)", at: Date.now() } }); return { state: "test" }; };
+  const testDone = async (type, L = link) => { await set({ sup: { state: "test", id: L.id, type, uuid, sandbox: true, err: "🧪 تجربة ناجحة — الطلب ما اتنفذش فعلياً (وضع التجربة)", at: Date.now() } }); return { state: "test" }; };
+  const sendOnce = async (link) => {
   let r;
   if (link.type === "digital") {
     const payload = { productID: link.id, env: sandbox ? "sandbox" : "production" };
     if (input && link.key) payload.optionalFields = { [link.key]: input };
     r = await lpSafe(ctx, "POST", "/digital-products/payment", { json: payload });
     const d = r.data?.data;
-    if (r.ok && r.data?.status !== false && d && (sandbox || fake(d.secretNumber))) return await testDone("digital");
+    if (r.ok && r.data?.status !== false && d && (sandbox || fake(d.secretNumber))) return { result: await testDone("digital", link) };
     if (r.ok && r.data?.status !== false && d) {
       // some products return only an order reference ("order-<id>") and deliver the code later
       const isRef = v => /^order[-_]/i.test(String(v || "").trim());
@@ -770,10 +775,10 @@ async function execOrder(ctx, id, manual, supSettings) {
       if (codes.length) {
         const lines = codes.map(c => String(c.secretNumber).trim()).filter(Boolean);
         await set({ status: "done", delivery: lines.join("\n"), sup: { state: "done", id: link.id, type: "digital", uuid, ref, at: Date.now() }, updatedAt: Date.now() });
-        return { state: "done" };
+        return { result: { state: "done" } };
       }
       await set({ status: "processing", sup: { state: "sent", id: link.id, type: "digital", uuid, ref, at: Date.now() }, updatedAt: Date.now() });
-      return { state: "sent" };
+      return { result: { state: "sent" } };
     }
   } else {
     const params = {};
@@ -781,18 +786,32 @@ async function execOrder(ctx, id, manual, supSettings) {
     const payload = { product_id: link.id, qty: 1, params, order_uuid: uuid, env: sandbox ? "sandbox" : "production" };
     r = await lpSafe(ctx, "POST", "/social/pay", { json: payload });
     const d = r.data?.data;
-    if (r.ok && r.data?.status !== false && d && sandbox) return await testDone("social");
+    if (r.ok && r.data?.status !== false && d && sandbox) return { result: await testDone("social", link) };
     if (r.ok && r.data?.status !== false && d) {
       const ref = String(d.order_id ?? d.id ?? "");
       await set({ status: "processing", sup: { state: "sent", id: link.id, type: "social", uuid, ref, ext: String(d.external_id ?? ""), at: Date.now() }, updatedAt: Date.now() });
-      return { state: "sent" };
+      return { result: { state: "sent" } };
     }
+  }
+  return { r };
+  };
+  // if the supplier refuses because the product got a new number on their side, find it by name and try once more
+  let L = link, r;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await sendOnce(L);
+    if (res.result) return res.result;
+    r = res.r;
+    if (attempt === 0 && failKind(r) === "reject") {
+      const nl = await relinkServer(ctx, o.productId, o.optionIndex, L).catch(e => (console.error(e), null));
+      if (nl) { L = nl; continue; }
+    }
+    break;
   }
   // what went wrong decides what happens next
   const err = r.lost ? "انقطع الاتصال بالمزوّد — راجع حسابك عند المزوّد قبل ما تعاود الإرسال" : lpMsg(r);
   const raw = r.lost ? "" : JSON.stringify(r.data ?? "").slice(0, 400);
   const kind = failKind(r);
-  const supFail = { state: "failed", id: link.id, type: link.type || "", uuid, err, raw, http: r.status || 0, kind, at: Date.now() };
+  const supFail = { state: "failed", id: L.id, type: L.type || "", uuid, err, raw, http: r.status || 0, kind, at: Date.now() };
   const na = kind === "reject" && unavailableMsg(r);
   if (na) await markOff(ctx, o.productId, o.optionIndex, "fail");
   // the supplier refused the order (nothing was charged there): give the customer the money back right away
@@ -802,6 +821,39 @@ async function execOrder(ctx, id, manual, supSettings) {
   }
   await set({ sup: supFail });
   return { state: "failed", err, hidden: na };
+}
+// supplier product names compared loosely (spaces, dashes, Arabic letter forms)
+const nameKey = t => String(t || "").toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[\s\-_–—.,:()/]+/g, "").trim();
+function findByName(tree, link) {
+  const all = flattenTree(tree);
+  if (all.some(x => x.id === String(link.id))) return { same: true };
+  const k = nameKey(link.name);
+  let c = all.filter(x => k && nameKey(x.name) === k && x.available);
+  if (link.type) { const t = c.filter(x => x.type === link.type); if (t.length) c = t; }
+  if (c.length > 1 && link.cost > 0) {
+    c.sort((a, b) => Math.abs(a.price - link.cost) - Math.abs(b.price - link.cost));
+    if (Math.abs(c[0].price - link.cost) === Math.abs(c[1].price - link.cost)) return { ambiguous: true, list: c };
+    c = [c[0]];
+  }
+  if (c.length !== 1) return { list: c };
+  return { match: c[0] };
+}
+async function relinkServer(ctx, pid, idx, link) {
+  if (!link?.name) return null;
+  const f = findByName(await supTree(ctx), link);
+  const x = f.match;
+  if (!x) return null;
+  // never sell at a loss: a much higher cost needs the admin to reprice first
+  if (link.cost > 0 && (x.cur || "") === (link.cur || "") && x.price > link.cost * 1.15) return null;
+  const nl = { ...link, id: x.id, type: x.type, key: x.key || link.key || "", name: x.name, cost: x.price, cur: x.cur, relinkedAt: Date.now(), oldId: String(link.id) };
+  for (let i = 0; i < 3; i++) {
+    const p = await getD(ctx, "products", pid);
+    if (!p?.data?.options?.[idx]) return null;
+    const options = p.data.options.map((o, j) => { if (j !== idx) return o; const { off, offBy, offAt, ...rest } = o; return { ...rest, sup: nl }; });
+    const res = await ctx.db.batch([updS(ctx, "products", pid, { ...p.data, options }, p.v), pubDirty(ctx)]);
+    if (res[0].meta.changes === 1) return nl;
+  }
+  return null;
 }
 async function lpSafe(ctx, method, path, opts) {
   try { return await lp(ctx, method, path, opts); }
