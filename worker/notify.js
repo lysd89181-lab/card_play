@@ -80,7 +80,7 @@ export default {
         const d = r.data?.data || {};
         return json({ ok: r.ok, status: r.status, balance: d.wallet ?? null, currency: d.currency_code || "", name: d.name || "" });
       }
-      if (a === "sup_exec") { need("orders"); if (!validId(body.id)) return json({ ok: false }, 400); return json({ ok: true, ...(await execOrder(ctx, body.id, true)) }); }
+      if (a === "sup_exec") { need("orders"); if (!validId(body.id)) return json({ ok: false }, 400); return json({ ok: true, ...(await execOrder(ctx, body.id, !!body.manual)) }); }
       if (a === "sup_sync") { need("orders"); return json({ ok: true, ...(await syncOrders(ctx, null, false)) }); }
       return json({ ok: false, error: "unknown action" }, 400);
     } catch (e) {
@@ -282,7 +282,7 @@ async function buy(ctx, user, b) {
   const [p, me, st] = await Promise.all([getD(ctx, "products", pid), getD(ctx, "users", user.uid), settingsOf(ctx)]);
   if (!p || p.data.active === false) UE("المنتج غير متاح حالياً");
   const o = (p.data.options || [])[idx];
-  if (!o) UE("الباقة غير متاحة");
+  if (!o || o.off) UE("الباقة غير متوفرة حالياً");
   const w = (st.payments || []).find(x => x.key === wk);
   if (st.payments?.length && (!w || w.enabled === false)) UE("المحفظة غير متاحة");
   const price = Math.round(priceFor(o, wk));
@@ -418,19 +418,23 @@ async function adminOps(ctx, who, ops) {
 }
 async function orderRefund(ctx, b) {
   if (!validId(b.id)) UE("طلب غير صحيح");
-  const o = await getD(ctx, "orders", b.id);
+  if (!(await refundCore(ctx, b.id, str(b.note, 300)))) UE("الطلب تغيّر، حاول مرة أخرى");
+  return {};
+}
+// cancel + money back to the same wallet, in one step (false if the order changed meanwhile)
+async function refundCore(ctx, id, note, extra = {}) {
+  const o = await getD(ctx, "orders", id);
   if (!o) UE("الطلب غير موجود");
   if (o.data.status === "cancelled") UE("الطلب ملغي مسبقاً");
   const w = o.data.wallet || "";
   if (w && !validKey(w)) UE("محفظة غير صحيحة");
   const t = Date.now();
-  const nd = { ...o.data, status: "cancelled", refunded: true, delivery: "", adminNote: str(b.note, 300), updatedAt: t };
+  const nd = { ...o.data, ...extra, status: "cancelled", refunded: true, delivery: "", adminNote: note, updatedAt: t };
   const res = await ctx.db.batch([
-    ctx.db.prepare("UPDATE docs SET data = ?1, v = v + 1, updated = ?2 WHERE col = 'orders' AND id = ?3 AND v = ?4 AND del = 0").bind(JSON.stringify(nd), t, b.id, o.v),
+    ctx.db.prepare("UPDATE docs SET data = ?1, v = v + 1, updated = ?2 WHERE col = 'orders' AND id = ?3 AND v = ?4 AND del = 0").bind(JSON.stringify(nd), t, id, o.v),
     ctx.db.prepare(`UPDATE docs SET data = ${addSQL("?1")}, v = v + 1, updated = ?3 WHERE col = 'users' AND id = ?4 AND changes() = 1`).bind(walletPath(w), Number(o.data.price) || 0, t, o.data.uid)
   ]);
-  if (res[0].meta.changes !== 1) UE("الطلب تغيّر، حاول مرة أخرى");
-  return {};
+  return res[0].meta.changes === 1;
 }
 async function topupApprove(ctx, b) {
   if (!validId(b.id)) UE("طلب غير صحيح");
@@ -627,6 +631,7 @@ function normProduct(p) {
   const obj = fields.find(f => f && typeof f === "object" && f.key && String(f.required ?? "1") === "1") || fields.find(f => f && typeof f === "object" && f.key);
   if (obj) { key = obj.key; label = obj.label || obj.name || obj.hint || ""; }
   else if (fields.length && typeof fields[0] === "string") { key = p.validation_field || "player_id"; label = fields[0]; }
+  const nreq = fields.filter(f => f && typeof f === "object" && f.key && String(f.required ?? "1") === "1").length;
   const digital = p.pro_type === "digt" || (!!p.likecard_option_feilds && !p.params);
   const ptype = String(p.product_type || "").toLowerCase();
   return {
@@ -634,7 +639,8 @@ function normProduct(p) {
     price: [p.selling_price, p.final_price, p.price, p.fixed_price, p.original_price].map(Number).find(v => isFinite(v) && v > 0) || 0, cur: p.currency_sign || p.currency_code || "",
     type: digital ? "digital" : "social", key, label,
     amount: !digital && (ptype === "amount" || !!(p.qty_values && p.qty_values.min && Number(p.qty_values.min) > 1)),
-    available: p.available !== false
+    available: p.available !== false,
+    multi: nreq > 1
   };
 }
 async function supTree(ctx) {
@@ -678,10 +684,11 @@ async function onNew(ctx, type, id) {
   const money = (c, cur) => `${(Number(c || 0) / 100).toFixed(2)} ${cur || "د.ل"}`;
   if (type === "orders" && exec && (exec.state === "done" || exec.state === "sent")) return { sent: 0, exec };
   let title = type === "orders" ? "🛒 طلب شراء جديد" : "💰 طلب شحن جديد";
-  if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
+  if (exec?.state === "refunded") title = exec.hidden ? "↩️ منتج غير متوفر عند المزوّد — رجعنا المبلغ وخفينا الباقة" : "↩️ المزوّد رفض الطلب — رجعنا المبلغ للزبون";
+  else if (exec?.state === "failed") title = "⚠️ طلب يحتاج تدخل";
   else if (exec?.state === "test") title = "🧪 طلب تجريبي (ما اتنفذش)";
   const body = type === "orders"
-    ? `${d.uName || ""} — ${d.productName || ""} ${d.optionLabel || ""} — ${money(d.price, d.cur)}${exec?.state === "failed" ? " — " + exec.err : ""}`
+    ? `${d.uName || ""} — ${d.productName || ""} ${d.optionLabel || ""} — ${money(d.price, d.cur)}${exec?.err ? " — " + exec.err : ""}`
     : `${d.uName || ""} — محفظة ${d.methodName || ""} — ${money(d.amount, d.cur)}`;
   const sent = await pushAll(ctx, title, body, (type === "orders" ? "o" : "t") + id);
   return { sent, exec };
@@ -737,7 +744,7 @@ async function execOrder(ctx, id, manual, supSettings) {
   if (link.type === "digital") {
     const payload = { productID: link.id, env: sandbox ? "sandbox" : "production" };
     if (input && link.key) payload.optionalFields = { [link.key]: input };
-    r = await lp(ctx, "POST", "/digital-products/payment", { json: payload });
+    r = await lpSafe(ctx, "POST", "/digital-products/payment", { json: payload });
     const d = r.data?.data;
     if (r.ok && r.data?.status !== false && d && (sandbox || fake(d.secretNumber))) return await testDone("digital");
     if (r.ok && r.data?.status !== false && d) {
@@ -758,7 +765,7 @@ async function execOrder(ctx, id, manual, supSettings) {
     const params = {};
     if (link.key) params[link.key] = input;
     const payload = { product_id: link.id, qty: 1, params, order_uuid: uuid, env: sandbox ? "sandbox" : "production" };
-    r = await lp(ctx, "POST", "/social/pay", { json: payload });
+    r = await lpSafe(ctx, "POST", "/social/pay", { json: payload });
     const d = r.data?.data;
     if (r.ok && r.data?.status !== false && d && sandbox) return await testDone("social");
     if (r.ok && r.data?.status !== false && d) {
@@ -767,9 +774,46 @@ async function execOrder(ctx, id, manual, supSettings) {
       return { state: "sent" };
     }
   }
-  const err = lpMsg(r);
-  await set({ sup: { state: "failed", id: link.id, type: link.type || "", uuid, err, at: Date.now() } });
-  return { state: "failed", err };
+  // what went wrong decides what happens next
+  const err = r.lost ? "انقطع الاتصال بالمزوّد — راجع حسابك عند المزوّد قبل ما تعاود الإرسال" : lpMsg(r);
+  const raw = r.lost ? "" : JSON.stringify(r.data ?? "").slice(0, 400);
+  const kind = failKind(r);
+  const supFail = { state: "failed", id: link.id, type: link.type || "", uuid, err, raw, http: r.status || 0, kind, at: Date.now() };
+  const na = kind === "reject" && unavailableMsg(r);
+  if (na) await markOff(ctx, o.productId, o.optionIndex, "fail");
+  // the supplier refused the order (nothing was charged there): give the customer the money back right away
+  if (kind === "reject" && !manual) {
+    const note = na ? "المنتج غير متوفر حالياً عند المورد، رجعنا المبلغ لمحفظتك" : "تعذر تنفيذ الطلب" + (/id|player|user|معرف|الآيدي/i.test(supMessage(r)) ? " — تأكد من البيانات المدخلة" : "") + "، رجعنا المبلغ لمحفظتك";
+    if (await refundCore(ctx, id, note, { sup: { ...supFail, state: "refunded" } })) return { state: "refunded", err, hidden: na };
+  }
+  await set({ sup: supFail });
+  return { state: "failed", err, hidden: na };
+}
+async function lpSafe(ctx, method, path, opts) {
+  try { return await lp(ctx, method, path, opts); }
+  catch (e) { return { ok: false, status: 0, data: null, lost: true }; }
+}
+const supMessage = r => String((typeof r.data?.data === "string" ? r.data.data : "") || r.data?.message || r.data?.error || r.data?.msg || (r.data?.errors ? JSON.stringify(r.data.errors) : "") || "");
+// temp = try again later, balance/keys = admin must act, reject = the supplier refused this order
+function failKind(r) {
+  if (r.lost || !r.status || r.status >= 500 || r.status === 429) return "temp";
+  if (r.status === 401 || r.status === 403) return "keys";
+  const m = supMessage(r);
+  if (/balance|insufficient|fund|credit|رصيد/i.test(m)) return "balance";
+  if (r.status === 400 && !unavailableMsg(r)) return "balance";
+  return "reject";
+}
+const unavailableMsg = r => /not\s*(found|available|exist)|unavailable|out\s*of\s*stock|stock|disabled|inactive|غير\s*(متوفر|متاح|موجود|مفعل)|نف[ذد]|انتهت|منتهي/i.test(supMessage(r)) || (r.status === 404);
+// hide one package from the store (it comes back when the supplier lists it as available again)
+async function markOff(ctx, pid, idx, by) {
+  for (let i = 0; i < 3; i++) {
+    const p = await getD(ctx, "products", pid);
+    const opt = p?.data?.options?.[idx];
+    if (!opt || opt.off) return;
+    const options = p.data.options.map((x, j) => j === idx ? { ...x, off: true, offBy: by, offAt: Date.now() } : x);
+    const r = await ctx.db.batch([updS(ctx, "products", pid, { ...p.data, options }, p.v), pubDirty(ctx)]);
+    if (r[0].meta.changes === 1) return;
+  }
 }
 
 /* ================= sync orders that are waiting at the supplier ================= */
@@ -835,6 +879,9 @@ async function supplierJobs(ctx) {
   // safety net: linked orders that were never sent (e.g. the first attempt was interrupted)
   const waiting = list.filter(o => o.data.status === "pending" && !o.data.sup && now - (Number(o.data.createdAt) || o.created) > 20000 && now - (Number(o.data.createdAt) || o.created) < 30 * 60 * 1000).slice(0, 3);
   for (const o of waiting) await execOrder(ctx, o.id, false, st.supplier);
+  // an attempt that never got an answer (connection dropped): show it to the admin instead of leaving it hanging
+  for (const o of list.filter(o => o.data.status === "pending" && o.data.sup?.state === "sending" && now - (Number(o.data.sup.at) || 0) > 3 * 60 * 1000).slice(0, 5))
+    await patchD(ctx, "orders", o.id, { sup: { ...o.data.sup, state: "failed", kind: "temp", err: "انقطع الاتصال بالمزوّد — راجع حسابك عند المزوّد قبل ما تعاود الإرسال" } });
   if (list.some(o => o.data.status === "processing" && o.data.sup?.state === "sent")) await syncOrders(ctx, null, false);
 }
 

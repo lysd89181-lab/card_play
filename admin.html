@@ -279,12 +279,13 @@ function applyDocs(docs, initial){
     const o = { id:d.i, ...d.d };
     if (i >= 0) arr[i] = o; else { arr.push(o); if (!initial) fresh.push([d.c, o]); }
   }
-  if (!changed) return;
+  if (!changed) return false;
   ["orders","topups","tickets","users"].forEach(k => D[k].sort((a,b)=>ms(b.createdAt)-ms(a.createdAt)));
   if (permsChanged) { if (!allowedTabs().includes(tab)) tab = allowedTabs()[0] || "orders"; $("#main").dataset.t = ""; }
   draw();
   if (openUser) uOpen(openUser, true);
   fresh.forEach(([c, o]) => watchNew(c, o));
+  return true;
 }
 async function adminPull(){
   if (AS.busy || !auth.currentUser) return;
@@ -294,14 +295,14 @@ async function adminPull(){
     while (more && guard++ < 15) {
       const j = await api("admin_sync", { since: AS.since ? AS.since - (overlap ? 5000 : 0) : 0 });
       if (gen !== AS.gen) return;
-      applyDocs(j.docs || [], !AS.since);
+      if (applyDocs(j.docs || [], !AS.since)) AS.idle = 0; else AS.idle = (AS.idle || 0) + 1;
       AS.since = j.now; more = !!j.more; overlap = false;
     }
   } catch (e) { console.error(e); }
   finally { AS.busy = false; }
 }
-function adminLoop(){ clearTimeout(AS.T); if (!auth.currentUser) return; AS.T = setTimeout(async () => { await adminPull(); adminLoop(); }, document.hidden ? 60000 : 5000); }
-async function adminKick(){ clearTimeout(AS.T); await adminPull(); adminLoop(); }
+function adminLoop(){ clearTimeout(AS.T); if (!auth.currentUser) return; AS.T = setTimeout(async () => { await adminPull(); adminLoop(); }, document.hidden ? 60000 : Math.min(5000 + (AS.idle || 0) * 1000, 15000)); }
+async function adminKick(){ AS.idle = 0; clearTimeout(AS.T); await adminPull(); adminLoop(); }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && auth.currentUser && AS.since) adminKick(); });
 
 onAuthStateChanged(auth, async u => {
@@ -317,6 +318,7 @@ onAuthStateChanged(auth, async u => {
   scr("panel");
   await adminPull(); adminLoop();
   if (ROLE === "owner") migWatch(me.mig);
+  setTimeout(supAvailAuto, 4000);
 });
 /* ---------- moving the old data (shows progress until it's done) ---------- */
 let migT = 0;
@@ -479,7 +481,8 @@ orders(){
       <div class="kv"><span>السعر:</span><b>${money(o.price, o.cur)}</b>${o.wallet?` <span class="m">(${esc(WN(o.wallet))})</span>`:""}</div>
       ${o.delivery?`<div class="kv"><span>المُسلَّم:</span><b style="white-space:pre-line">${esc(o.delivery)}</b></div>`:""}
       ${o.sup?.ref?`<div class="kv"><span>رقم عند المزوّد:</span><b class="num" style="font-size:12px">${esc(o.sup.ref)}</b>${cpb(o.sup.ref)}</div>`:""}
-      ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":o.sup.state==="test"?`<span style="color:var(--warn)">${esc(o.sup.err||"🧪 تجربة")}</span>`:`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>`:""}
+      ${o.sup?`<div class="kv"><span>المزوّد:</span><b>${o.sup.state==="done"?"✅ نُفّذ تلقائياً":o.sup.state==="sent"?"⏳ بانتظار المزوّد":o.sup.state==="sending"?"⏳ جاري الإرسال":o.sup.state==="test"?`<span style="color:var(--warn)">${esc(o.sup.err||"🧪 تجربة")}</span>`:o.sup.state==="refunded"?`<span style="color:var(--warn)">↩️ رفضه المزوّد ورجع المبلغ للزبون تلقائياً — ${esc(o.sup.err||"")}</span>`:`<span style="color:var(--err)">⚠️ ${esc(o.sup.err||"فشل")}</span>`}</b></div>
+      ${o.sup.raw?`<details style="margin-top:4px"><summary class="m" style="cursor:pointer">رد المزوّد</summary><div class="m num" style="direction:ltr;text-align:left;word-break:break-all;font-size:11.5px">${o.sup.http?`HTTP ${esc(o.sup.http)} · `:""}${esc(o.sup.raw)}</div></details>`:""}`:""}
       <div class="acts">
         ${D.settings?.supplier?.enabled && o.status==="pending" && (!o.sup || o.sup.state==="failed" || o.sup.state==="test") && supLinked(o) ? `<button class="btn btn-p" onclick="supExec('${o.id}',this)">تنفيذ عبر المزوّد</button>`:""}
         ${o.status==="pending"?`<button class="btn btn-o" onclick="oProc('${o.id}')">جاري التنفيذ</button>`:""}
@@ -519,11 +522,12 @@ products(){
     <button class="btn btn-p" onclick="bulkMove()">📁 نقل لقسم</button><button class="btn btn-o" onclick="bulkType()">🏷️ تغيير التصنيف</button>
     <button class="btn btn-o" onclick="bulkVis(false)">إخفاء</button><button class="btn btn-o" onclick="bulkVis(true)">إظهار</button>
     <button class="btn btn-x" onclick="bulkDel()">حذف</button><button class="btn btn-o" onclick="selP.clear();draw()">إلغاء التحديد</button></div>` : ""}`;
-  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
+  return `<div class="acts" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn btn-p" onclick="pNew()">+ منتج جديد</button>${D.products.some(p=>(p.options||[]).some(o=>o.sup?.id))?`<button class="btn btn-o" onclick="supReprice()">💲 إعادة تسعير منتجات المزوّد</button><button class="btn btn-o" onclick="supAvailBtn(this)">🔄 تحديث التوفر من المزوّد</button>`:""}${!list.length?`<button class="btn btn-o" onclick="seed()">إضافة بيانات تجريبية</button>`:""}</div>
   ${D.products.length ? bar : ""}
   ${list.length ? list.map(p => `<div class="card ${selP.has(p.id)?"sel":""}"><div class="top"><input type="checkbox" class="psel" data-p="${p.id}" ${selP.has(p.id)?"checked":""}>${pthumb(p)}<div class="t"><b class="h">${esc(p.name)}</b>
     <div class="m">${p.catId && D.cats.some(c=>c.id===p.catId) ? "📁 "+esc(catPath(p.catId))+" · " : ""}${CATS[p.category]||"—"} · ${(p.options||[]).length} باقات · ترتيب ${p.sort??"—"}</div>
     ${(p.options||[]).every(o => !PAYS().some(w => optPrice(o,w.key) > 0)) ? `<div class="m" style="color:var(--err);font-weight:800">⚠️ بدون أسعار — يظهر «غير متوفر» للزبائن.${(p.options||[]).some(o=>o.sup?.id) ? " استعمل «إعادة تسعير منتجات المزوّد»" : " اضغط تعديل وحط الأسعار"}</div>` : ""}
+    ${(p.options||[]).some(o=>o.off) ? `<div class="m" style="color:var(--warn);font-weight:800">⛔ ${(p.options||[]).filter(o=>o.off).length} من ${(p.options||[]).length} باقات مخفية — غير متوفرة عند المزوّد (ترجع بروحها لما تتوفر)</div>` : ""}
     <div class="m">${(p.options||[]).slice(0,3).map(o=>`${iso(esc(o.label))}: ${PAYS().map(w=>{ const v=optPrice(o,w.key); return v?`${esc(w.name)} ${(v/100).toFixed(2)}`:""; }).filter(Boolean).join("، ")||"بدون سعر"}`).join(" · ")}</div></div>
     <span class="badge ${p.active===false?"b-canc":"b-done"}">${p.active===false?"مخفي":"ظاهر"}</span></div>
     <div class="acts"><button class="btn btn-o" onclick="pEdit('${p.id}')">تعديل</button><button class="btn btn-o" onclick="pToggle('${p.id}')">${p.active===false?"إظهار":"إخفاء"}</button><button class="btn btn-x" onclick="pDel('${p.id}')">حذف</button></div></div>`).join("")
@@ -713,7 +717,7 @@ const A = {
 
 const supLinked = o => !!D.products.find(x=>x.id===o.productId)?.options?.[o.optionIndex]?.sup;
 window.supExec = (id, btn) => { if (confirm("إرسال الطلب للمزوّد للتنفيذ؟ (يتخصم من رصيدك عند المزوّد)")) busy(btn, async () => {
-  const r = await api("sup_exec", { id });
+  const r = await api("sup_exec", { id, manual:true });
   if (r.state === "done") toast("تم التنفيذ ✓","s"); else if (r.state === "sent") toast("أُرسل للمزوّد ✓ بانتظار التنفيذ","s"); else toast(r.err || "ما تمش التنفيذ","e"); }); };
 window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
 const autoTried = new Set();
@@ -850,7 +854,8 @@ window.pEdit = (id, draft) => {
     const options = readRows("popts").filter(o=>o.label).map(r => { const prices = {};
       PAYS().forEach(w => { const v = r["p_"+w.key]; if (v > 0) prices[w.key] = v; });
       let sup = null; try { sup = r.supj ? JSON.parse(r.supj) : null; } catch {}
-      return sup ? { label:r.label, prices, sup } : { label:r.label, prices }; })
+      const prev = sup?.id && (p.options||[]).find(o => o.sup?.id === sup.id && o.off);
+      return sup ? { label:r.label, prices, sup, ...(prev ? { off:true, offBy:prev.offBy||"", offAt:prev.offAt||0 } : {}) } : { label:r.label, prices }; })
       .filter(o => Object.keys(o.prices).length);
     if (!options.length) throw new Error("أضف باقة واحدة على الأقل بسعر في محفظة وحدة على الأقل");
     const url = $("#pu").value.trim(); if (url) img = url;
@@ -909,10 +914,10 @@ window.supImport = async () => {
   const picked = new Map();             // supplier product id -> { p, root, sub }
   let path = [];                         // [rootId] or [rootId, subId]
   const all = []; tree.forEach(c => { c.products.forEach(p => all.push({ p, root:c, sub:null })); c.subs.forEach(sc => sc.products.forEach(p => all.push({ p, root:c, sub:sc }))); });
-  const okItem = x => x.p.available && !x.p.amount && x.p.price > 0 && !have.has(x.p.id);
+  const okItem = x => x.p.available && !x.p.amount && !x.p.multi && x.p.price > 0 && !have.has(x.p.id);
   const thumb = (img, name) => img ? `<img class="thumb" src="${esc(img)}" alt="" loading="lazy">` : `<div class="thumb">${esc((name||"").slice(0,8))}</div>`;
   const prodRow = x => { const dis = !okItem(x);
-    const why = have.has(x.p.id) ? "مضاف عندك" : !x.p.available ? "غير متوفر" : x.p.amount ? "بالكمية — غير مدعوم" : !(x.p.price > 0) ? "بدون سعر عند المزوّد" : "";
+    const why = have.has(x.p.id) ? "مضاف عندك" : !x.p.available ? "غير متوفر" : x.p.amount ? "بالكمية — غير مدعوم" : x.p.multi ? "يطلب أكثر من خانة — غير مدعوم" : !(x.p.price > 0) ? "بدون سعر عند المزوّد" : "";
     return `<label class="card spi" style="display:flex;gap:10px;align-items:center;${dis?"opacity:.5":"cursor:pointer"}">
       <input type="checkbox" data-id="${esc(x.p.id)}" ${picked.has(x.p.id)?"checked":""} ${dis?"disabled":""} style="width:20px;height:20px;accent-color:var(--blue)">
       ${thumb(x.p.image, x.p.name)}
@@ -978,6 +983,32 @@ function readMargins(){
   return cfg;
 }
 const pricesWith = (cost, cur, cfg) => { const prices = {}; PAYS().filter(w=>w.enabled!==false && !cfg.off[w.key]).forEach(w => prices[w.key] = priceFromCost(cost, cur, w, cfg)); return prices; };
+async function supAvailSync(manual){
+  if (!can("products") || !D.settings?.supplier?.enabled) return 0;
+  const linked = D.products.filter(p => (p.options||[]).some(o => o.sup?.id));
+  if (!linked.length) return 0;
+  const tree = await loadTree(true);
+  const live = new Map(); tree.forEach(c => { c.products.forEach(x => live.set(x.id, x)); c.subs.forEach(sc => sc.products.forEach(x => live.set(x.id, x))); });
+  const ids = linked.flatMap(p => p.options.filter(o => o.sup?.id).map(o => o.sup.id));
+  // safety: if the supplier list looks broken, change nothing
+  if (live.size < 10 || ids.filter(i => live.has(i)).length < ids.length * 0.5) { if (manual) throw new Error("قائمة المزوّد ما وصلتش كاملة، حاول بعد شوية"); return 0; }
+  const now = Date.now(), b = writeBatch(db); let off = 0, on = 0;
+  linked.forEach(p => { let ch = false;
+    const options = p.options.map(o => { if (!o.sup?.id) return o;
+      const x = live.get(o.sup.id), na = !x || !x.available || !(x.price > 0);
+      if (na && !o.off) { ch = true; off++; return { ...o, off:true, offBy:"list", offAt:now }; }
+      // a package hidden after a failed order stays hidden for 6 hours even if the list says it's back
+      if (!na && o.off && !(o.offBy === "fail" && now - (o.offAt||0) < 6*3600*1000)) { ch = true; on++; const { off:_a, offBy:_b, offAt:_c, ...rest } = o; return rest; }
+      return o; });
+    if (ch) b.update(doc(db,"products",p.id), { options, updatedAt:serverTimestamp() }); });
+  await b.commit();
+  try { localStorage.setItem("cp_avail_at", String(now)); } catch {}
+  if (manual) toast(off || on ? `تم: ${off} باقة اتخفت · ${on} رجعت ✓` : "كل الباقات محدّثة ✓", "s");
+  return off + on;
+}
+window.supAvailBtn = btn => busy(btn, () => supAvailSync(true));
+function supAvailAuto(){ let t = 0; try { t = +localStorage.getItem("cp_avail_at") || 0; } catch {} if (Date.now() - t > 30*60*1000) supAvailSync(false).catch(e => console.warn(e)); }
+setInterval(() => { if (auth.currentUser && !document.hidden) supAvailAuto(); }, 5*60*1000);
 window.supReprice = async () => {
   const saved = lsGetJ("cp_margins", {});
   const linked = D.products.filter(p => (p.options||[]).some(o => o.sup?.id));

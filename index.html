@@ -754,7 +754,7 @@ function render(scrollTop){
 const back = to => `<button class="icon-btn back" onclick="${to ? `location.hash='#${to}'` : "history.back()"}">${ic("back")}</button>`;
 const pagebar = (title, to, act="") => `<div class="pagebar">${back(to)}<h1>${title}</h1>${act}</div>`;
 const balance = () => wbal(defW());
-const minPrice = (p, k) => { const v = (p.options||[]).map(o=>priceFor(o,k)).filter(x=>x>0); return v.length ? Math.min(...v) : 0; };
+const minPrice = (p, k) => { const v = (p.options||[]).filter(o=>!o.off).map(o=>priceFor(o,k)).filter(x=>x>0); return v.length ? Math.min(...v) : 0; };
 const priceTag = p => { const k = defW(), m = minPrice(p, k);
   if (m) return `<div class="pr">من ${money(m, curOf(k))}</div>`;
   const alt = pays().map(w => ({ w, v: minPrice(p, w.key) })).filter(x => x.v > 0)[0];
@@ -974,7 +974,7 @@ $("#sheet").addEventListener("touchend",e=>{ if(sy!==null && e.changedTouches[0]
 let selOpt = 0;
 window.openProduct = id => {
   const p = S.products.find(x=>x.id===id); if (!p) return;
-  const opts = (p.options || []).map((o,i)=>({ ...o, i })).filter(o => pays().some(w => priceFor(o, w.key) > 0));
+  const opts = (p.options || []).map((o,i)=>({ ...o, i })).filter(o => !o.off && pays().some(w => priceFor(o, w.key) > 0));
   let sel = -1, wk = null;
   const fromLabel = o => { const ps = pays().map(w=>({ w, v:priceFor(o,w.key) })).filter(x=>x.v>0);
     const lyd = ps.filter(x=>curOf(x.w.key)!=="$"), list = lyd.length ? lyd : ps;
