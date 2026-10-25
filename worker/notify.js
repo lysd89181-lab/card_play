@@ -7,6 +7,7 @@
 // Vars (wrangler.jsonc): FB_API_KEY, FB_PROJECT
 
 const LP = "https://api.libyaplay.com/portal";
+const VERSION = "2026-10-26b";
 const PROJECT_DEF = "cd-card-87365";
 const PUBLIC_COLS = ["products", "categories", "banners", "settings"];
 let cached = { token: "", exp: 0 };
@@ -30,7 +31,7 @@ export default {
       if (req.method === "GET") {
         if (url.pathname === "/public") return raw(await publicText(ctx), { "Cache-Control": "public, max-age=15" });
         if (url.pathname === "/status") return new Response(await statusPage(ctx), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
-        return json({ ok: true, service: "cardplay" });
+        return json({ ok: true, service: "cardplay", v: VERSION });
       }
       if (req.method !== "POST") return json({ ok: false }, 405);
       const body = JSON.parse(await req.text() || "{}");
@@ -670,8 +671,18 @@ async function supProbe(ctx, sid) {
   return { found: false, http: r.status };
 }
 async function supProbeByName(ctx, link) {
-  const f = findByName(await supTree(ctx), link);
-  return { match: f.match || null, list: (f.list || []).slice(0, 5) };
+  const tree = await supTree(ctx);
+  const f = findByName(tree, link);
+  // closest names (same numbers + shared words), with where they sit at the supplier
+  const words = t => String(t || "").toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const want = words(link.name), nums = want.filter(w => /^\d+$/.test(w));
+  const all = [];
+  tree.forEach(c => { c.products.forEach(p => all.push({ p, where: c.name })); c.subs.forEach(sc => sc.products.forEach(p => all.push({ p, where: c.name + " › " + sc.name }))); });
+  const near = all.map(x => { const w = words(x.p.name); const shared = want.filter(t => w.includes(t)).length; const numOk = nums.every(n => w.includes(n));
+      return { ...x, score: numOk ? shared : 0 }; })
+    .filter(x => x.score >= Math.max(1, Math.ceil(want.length / 2))).sort((a, b) => b.score - a.score).slice(0, 8)
+    .map(x => ({ id: x.p.id, name: x.p.name, where: x.where, price: x.p.price, cur: x.p.cur, type: x.p.type, key: x.p.key, available: x.p.available }));
+  return { match: f.match || null, near, total: all.length };
 }
 function flattenTree(tree) {
   const out = [];
@@ -832,7 +843,7 @@ function findByName(tree, link) {
   if (link.type) { const t = c.filter(x => x.type === link.type); if (t.length) c = t; }
   if (c.length > 1 && link.cost > 0) {
     c.sort((a, b) => Math.abs(a.price - link.cost) - Math.abs(b.price - link.cost));
-    if (Math.abs(c[0].price - link.cost) === Math.abs(c[1].price - link.cost)) return { ambiguous: true, list: c };
+    if (c[0].price !== c[1].price && Math.abs(c[0].price - link.cost) === Math.abs(c[1].price - link.cost)) return { ambiguous: true, list: c };
     c = [c[0]];
   }
   if (c.length !== 1) return { list: c };

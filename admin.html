@@ -729,8 +729,22 @@ window.supProbe = (id, btn) => busy(btn, async () => {
     <div class="sec">رد المزوّد على الطلب</div>${pre(`HTTP ${o.sup.http||"?"}\n${o.sup.raw||o.sup.err||""}`)}
     <div class="sec">المنتج عند المزوّد</div>${r.found ? `<div class="m">📁 ${esc(r.where)}</div>${pre(JSON.stringify(r.norm, null, 1))}${pre(r.raw)}` : `<div class="m" style="color:var(--err)">المنتج رقم ${esc(link.id||"—")} مش موجود في قائمة المزوّد</div>
       ${r.byName?.match ? `<div class="m" style="color:var(--ok);margin-top:6px">✅ لقيناه بنفس الاسم برقم جديد: ${esc(r.byName.match.id)} — يتصلح بروحه مع أول طلب، أو اضغط «🔄 تحديث التوفر من المزوّد» في المنتجات</div>${pre(JSON.stringify(r.byName.match, null, 1))}`
-        : (r.byName?.list||[]).length ? `<div class="m" style="margin-top:6px">منتجات بأسماء قريبة:</div>${pre(JSON.stringify(r.byName.list, null, 1))}` : ""}`}
+        : ""}
+      ${!r.byName ? `<div class="m" style="color:var(--warn);margin-top:6px">السيرفر مازال على النسخة القديمة — استنى دقيقتين وعاود</div>`
+        : (r.byName.near||[]).length ? `<div class="sec">أقرب منتجات عند المزوّد (من ${r.byName.total})</div>${r.byName.near.map((x,i) => `<div class="card" style="padding:10px;margin-bottom:8px">
+            <b class="h" style="font-size:13.5px">${esc(x.name)}</b><div class="m">📁 ${esc(x.where)} · ${x.type==="digital"?"رقمي":"شحن مباشر"} · تكلفة ${esc(x.price)} ${esc(x.cur)}${x.available?"":" · <span style='color:var(--err)'>غير متوفر</span>"}</div>
+            <div class="m num" style="direction:ltr;text-align:left;font-size:11px">${esc(x.id)}</div>
+            <button class="btn btn-p" style="margin-top:6px" data-relink="${i}">🔗 اربط الباقة بهذا</button></div>`).join("")}`
+        : `<div class="m" style="margin-top:6px">ما لقيناش أي منتج قريب في قائمة المزوّد (${r.byName.total} منتج)</div>`}`}
     <p class="m" style="margin-top:10px;color:var(--muted)">صوّر الصفحة هذي وابعتها للدعم الفني.</p>`);
+  document.querySelectorAll("[data-relink]").forEach(b => b.onclick = () => busy(b, async () => {
+    const x = r.byName.near[+b.dataset.relink]; if (!p) throw new Error("المنتج مش موجود");
+    if (link.cost > 0 && (x.cur||"") === (link.cur||"") && x.price > link.cost * 1.15 && !confirm("تكلفة هذا أغلى من القديم بأكثر من 15% — راجع السعر بعدين. نكمّل؟")) return;
+    const idx = o.optionIndex;
+    const opts = p.options.map((op, j) => { if (j !== idx) return op; const { off:_a, offBy:_b, offAt:_c, ...rest } = op; return { ...rest, sup:{ ...link, id:x.id, type:x.type, key:x.key||link.key||"", name:x.name, cost:x.price, cur:x.cur, relinkedAt:Date.now(), oldId:String(link.id||"") } }; });
+    await updateDoc(doc(db,"products",p.id), { options:opts, updatedAt:serverTimestamp() });
+    closeSheet(); toast("تم الربط ✓ الطلبات الجاية تمشي على المنتج هذا","s");
+  }));
 });
 window.supSync = btn => busy(btn, async () => { const r = await api("sup_sync"); toast(r.updated ? `تحدّث ${r.updated} طلب ✓` : "ما فيش تحديثات جديدة","s"); });
 const autoTried = new Set();
@@ -1008,7 +1022,7 @@ async function supAvailSync(manual){
   const byName = new Map(); live.forEach(x => { const k = nameKey(x.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(x); });
   const relinkOf = s => { let c = (byName.get(nameKey(s.name)) || []).filter(x => x.available && x.price > 0);
     if (s.type) { const t = c.filter(x => x.type === s.type); if (t.length) c = t; }
-    if (c.length > 1 && s.cost > 0) { c = [...c].sort((a,b) => Math.abs(a.price-s.cost) - Math.abs(b.price-s.cost)); if (Math.abs(c[0].price-s.cost) === Math.abs(c[1].price-s.cost)) return null; c = [c[0]]; }
+    if (c.length > 1 && s.cost > 0) { c = [...c].sort((a,b) => Math.abs(a.price-s.cost) - Math.abs(b.price-s.cost)); if (c[0].price !== c[1].price && Math.abs(c[0].price-s.cost) === Math.abs(c[1].price-s.cost)) return null; c = [c[0]]; }
     const x = c.length === 1 ? c[0] : null;
     if (!x || (s.cost > 0 && (x.cur||"") === (s.cur||"") && x.price > s.cost * 1.15)) return null;
     return { ...s, id:x.id, type:x.type, key:x.key || s.key || "", name:x.name, cost:x.price, cur:x.cur, relinkedAt:Date.now(), oldId:String(s.id) }; };
